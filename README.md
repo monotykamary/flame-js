@@ -58,6 +58,12 @@ Mode resolution:
 ## Install
 
 ```bash
+npm install @flame/core
+# or
+pnpm add @flame/core
+# or
+yarn add @flame/core
+# or
 bun add @flame/core
 ```
 
