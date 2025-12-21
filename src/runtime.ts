@@ -80,9 +80,9 @@ export function createRuntime(config: FlameConfig, registry: FlameRegistry): Fla
 
       const poolName = options?.pool ?? config.defaultPool ?? "default";
 
-      const effect = Effect.gen(function* (_) {
-        const pool = yield* _(poolManager.get(poolName));
-        const runner = yield* _(pool.acquire);
+      const effect = Effect.gen(function* () {
+        const pool = yield* poolManager.get(poolName);
+        const runner = yield* pool.acquire;
 
         const call = Effect.tryPromise({
           try: () => invokeRemote<ReturnType>(runner, serviceId, methodId, args, options, config),
@@ -93,7 +93,7 @@ export function createRuntime(config: FlameConfig, registry: FlameRegistry): Fla
         });
 
         const withRelease = call.pipe(Effect.ensuring(pool.release(runner).pipe(Effect.ignore)));
-        return yield* _(withRelease);
+        return yield* withRelease;
       });
 
       const schedule = buildRetrySchedule(options?.retry);

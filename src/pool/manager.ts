@@ -34,7 +34,7 @@ export function createPoolManager(config: PoolManagerConfig): PoolManager {
   const pools = new Map<string, Pool>();
 
   const get = Effect.fn("PoolManager.get")((name: string) =>
-    Effect.gen(function* (_) {
+    Effect.gen(function* () {
       const existing = pools.get(name);
       if (existing) {
         return existing;
@@ -45,16 +45,16 @@ export function createPoolManager(config: PoolManagerConfig): PoolManager {
         throw new InvokeError("config_error", `Pool not configured: ${name}`);
       }
 
-      const pool = yield* _(createPool(name, poolConfig, config.backend));
+      const pool = yield* createPool(name, poolConfig, config.backend);
       pools.set(name, pool);
       return pool;
     })
   );
 
   const shutdownAll = Effect.fn("PoolManager.shutdownAll")(() =>
-    Effect.gen(function* (_) {
+    Effect.gen(function* () {
       for (const pool of pools.values()) {
-        yield* _(pool.shutdown);
+        yield* pool.shutdown;
       }
     })
   )();
