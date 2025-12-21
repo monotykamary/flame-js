@@ -1,5 +1,7 @@
 # @flame/core
 
+[![codecov](https://codecov.io/gh/monotykamary/flame-js/branch/main/graph/badge.svg)](https://codecov.io/gh/monotykamary/flame-js)
+
 FLAME-style remote execution for TypeScript with Bun, Effect.ts internals, and a same-image / different-entrypoint model.
 
 ## Homage
