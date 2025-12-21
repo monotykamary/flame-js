@@ -169,6 +169,54 @@ const layer = FlameService.layer({ mode: "local" });
 const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
 ```
 
+### Effect structure (internal graph)
+
+```text
+                         ┌──────────────────────────────┐
+                         │           flame.ts           │
+                         │  - service / fn              │
+                         │  - serviceEffect / fnEffect  │
+                         │  - toEffect                  │
+                         └───────────────┬──────────────┘
+                                         │
+                                         │ returns proxies or Effect wrappers
+                                         v
+                         ┌──────────────────────────────┐
+                         │          proxy.ts            │
+                         │  - createServiceProxyEffect  │
+                         │  - toEffect (wraps metadata) │
+                         └───────────────┬──────────────┘
+                                         │
+                                         │ delegates to runtimeRef
+                                         v
+                         ┌──────────────────────────────┐
+                         │         runtime.ts           │
+                         │  - invokeEffect (Effect.fn)  │
+                         │  - invoke (Promise boundary) │
+                         └───────────────┬──────────────┘
+                                         │
+                                         │ uses PoolManager + Pool
+                                         v
+   ┌──────────────────────────────┐   ┌──────────────────────────────┐
+   │      pool/manager.ts         │   │        pool/pool.ts          │
+   │  - get(name) -> Effect       │   │  - acquire/release/shutdown  │
+   │  - shutdownAll -> Effect     │   │  - Queue/Ref/Scope internals │
+   └───────────────┬──────────────┘   └───────────────┬──────────────┘
+                   │                                  │
+                   └──────────────┬───────────────────┘
+                                  │
+                                  │ spawns/terminates runners
+                                  v
+                         ┌──────────────────────────────┐
+                         │    backend (config-driven)   │
+                         │  - spawn/terminate/health    │
+                         └──────────────────────────────┘
+
+Effect boundary:
+- Promise API: flame.service / flame.fn → runtime.invoke → Effect.runPromise(invokeEffect)
+- Effect API: flame.serviceEffect / fnEffect / toEffect → runtime.invokeEffect (returns Effect)
+```
+
 ### Decorators (experimental)
 
 Enable `experimentalDecorators` in `tsconfig.json`.
