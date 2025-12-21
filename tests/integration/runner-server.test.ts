@@ -33,6 +33,16 @@ describe("runner server", () => {
     await server.stop();
   });
 
+  it("rejects wrong paths", async () => {
+    const runner = createFlame({ mode: "runner" });
+    const server = runner.createRunnerServer({ port: 0 });
+
+    const response = await fetch(`${server.url}/wrong`, { method: "POST" });
+    expect(response.status).toBe(404);
+
+    await server.stop();
+  });
+
   it("rejects expired requests", async () => {
     const runner = createFlame({ mode: "runner" });
     runner.service("svc", { echo: async (value: string) => value });
@@ -71,6 +81,25 @@ describe("runner server", () => {
     await server.stop();
   });
 
+  it("handles argument deserialization errors", async () => {
+    const runner = createFlame({ mode: "runner" });
+    runner.service("svc", { echo: async (value: string) => value });
+    const server = runner.createRunnerServer({ port: 0, exposeErrors: true });
+
+    const body = makeRequestBody({ args: "not-json" });
+    const response = await fetch(`${server.url}/invoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body
+    });
+
+    const payload = (await response.json()) as { ok: boolean; error?: { code?: string } };
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.code).toBe("serialization_error");
+
+    await server.stop();
+  });
+
   it("rejects unknown methods", async () => {
     const runner = createFlame({ mode: "runner" });
     const server = runner.createRunnerServer({ port: 0 });
@@ -100,11 +129,37 @@ describe("runner server", () => {
     await server.stop();
   });
 
+  it("returns timeout errors", async () => {
+    const runner = createFlame({ mode: "runner" });
+    runner.service("svc", {
+      slow: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return "ok";
+      }
+    });
+    const server = runner.createRunnerServer({ port: 0 });
+
+    const body = makeRequestBody({ methodId: "slow", timeoutMs: 5 });
+    const response = await fetch(`${server.url}/invoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body
+    });
+
+    const payload = (await response.json()) as { ok: boolean; error?: { code?: string } };
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.code).toBe("timeout");
+
+    await server.stop();
+  });
+
   it("hides error details by default", async () => {
     const runner = createFlame({ mode: "runner" });
-    runner.service("svc", { boom: async () => {
-      throw new Error("boom");
-    } });
+    runner.service("svc", {
+      boom: async () => {
+        throw new Error("boom");
+      }
+    });
     const server = runner.createRunnerServer({ port: 0 });
 
     const body = makeRequestBody({ methodId: "boom" });
@@ -117,6 +172,29 @@ describe("runner server", () => {
     const payload = (await response.json()) as { ok: boolean; error?: { details?: unknown } };
     expect(payload.ok).toBe(false);
     expect(payload.error?.details).toBeUndefined();
+
+    await server.stop();
+  });
+
+  it("exposes error details when enabled", async () => {
+    const runner = createFlame({ mode: "runner" });
+    runner.service("svc", {
+      boom: async () => {
+        throw new Error("boom");
+      }
+    });
+    const server = runner.createRunnerServer({ port: 0, exposeErrors: true });
+
+    const body = makeRequestBody({ methodId: "boom" });
+    const response = await fetch(`${server.url}/invoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body
+    });
+
+    const payload = (await response.json()) as { ok: boolean; error?: { details?: unknown } };
+    expect(payload.ok).toBe(false);
+    expect(payload.error?.details).toBeDefined();
 
     await server.stop();
   });

@@ -38,6 +38,12 @@ describe("registry", () => {
     expect(() => getMethod(registry, "missing", "method")).toThrow();
   });
 
+  it("throws on missing methods", () => {
+    const registry = createRegistry();
+    registry.registerService({ id: "svc", methods: new Map() });
+    expect(() => getMethod(registry, "svc", "missing")).toThrow();
+  });
+
   it("merges methods for repeated registration", async () => {
     const registry = createRegistry();
     const one = async () => 1;
@@ -57,5 +63,54 @@ describe("registry", () => {
     const twoMethod = getMethod(registry, "svc", "two");
     expect(oneMethod.handler).toBe(one);
     expect(twoMethod.handler).toBe(two);
+  });
+
+  it("rejects conflicting service options", () => {
+    const registry = createRegistry();
+    registry.registerService({
+      id: "svc",
+      methods: new Map(),
+      options: { pool: "default" }
+    });
+
+    expect(() =>
+      registry.registerService({
+        id: "svc",
+        methods: new Map(),
+        options: { pool: "other" }
+      })
+    ).toThrow();
+  });
+
+  it("rejects conflicting method handlers", () => {
+    const registry = createRegistry();
+    const first = async () => "one";
+    const second = async () => "two";
+
+    registry.registerService({
+      id: "svc",
+      methods: new Map([["ping", { id: "ping", handler: first }]])
+    });
+
+    expect(() =>
+      registry.registerService({
+        id: "svc",
+        methods: new Map([["ping", { id: "ping", handler: second }]])
+      })
+    ).toThrow();
+  });
+
+  it("lists services", () => {
+    const registry = createRegistry();
+    registry.registerService({ id: "svc", methods: new Map() });
+    expect(registry.listServices().length).toBe(1);
+  });
+
+  it("returns services by id", () => {
+    const registry = createRegistry();
+    const service = { id: "svc", methods: new Map() };
+    registry.registerService(service);
+    expect(registry.getService("svc")).toBe(service);
+    expect(registry.getService("missing")).toBeUndefined();
   });
 });

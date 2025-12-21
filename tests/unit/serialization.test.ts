@@ -22,4 +22,8 @@ describe("serialization", () => {
     });
     expect(() => serialize(value)).toThrow();
   });
+
+  it("fails on invalid payloads", () => {
+    expect(() => deserialize("not-json")).toThrow();
+  });
 });

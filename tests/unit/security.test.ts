@@ -10,6 +10,7 @@ describe("security", () => {
 
     expect(verifySignature(body, signature, secret)).toBe(true);
     expect(verifySignature(body, "deadbeef", secret)).toBe(false);
+    expect(verifySignature(body, signature, undefined as unknown as string)).toBe(false);
   });
 
   it("validates time windows", () => {
