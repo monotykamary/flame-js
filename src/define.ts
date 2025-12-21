@@ -13,7 +13,11 @@ export function defineMethod<Args extends unknown[], Result>(
   handler: FlameHandler<Args, Result>,
   options?: FlameOptions
 ): FlameMethod<Args, Result> {
-  return { id, handler, options, __flameMethod: true };
+  const method: FlameMethod<Args, Result> = { id, handler, __flameMethod: true };
+  if (options !== undefined) {
+    method.options = options;
+  }
+  return method;
 }
 
 export function isFlameMethod(value: unknown): value is FlameMethod {
@@ -33,7 +37,10 @@ export function normalizeMethods(
 
   for (const [key, value] of Object.entries(methods)) {
     if (isFlameMethod(value)) {
-      const def = { id: value.id, handler: value.handler, options: value.options };
+      const def: MethodDefinition = { id: value.id, handler: value.handler };
+      if (value.options !== undefined) {
+        def.options = value.options;
+      }
       byId.set(value.id, def);
       byProperty[key] = def;
     } else {
@@ -53,7 +60,10 @@ export function registerService(
   methods: Map<string, MethodDefinition>,
   options?: FlameOptions
 ): ServiceDefinition {
-  const service: ServiceDefinition = { id: serviceId, methods, options };
+  const service: ServiceDefinition = { id: serviceId, methods };
+  if (options !== undefined) {
+    service.options = options;
+  }
   registry.registerService(service);
   return service;
 }

@@ -5,3 +5,6 @@ coverage
 .env
 .env.*
 *.log
+*.tsbuildinfo
+!.vscode/
+!.vscode/settings.json

@@ -74,6 +74,28 @@ await service.charge(50);
 await service.refund(10);
 ```
 
+### Effect integration
+
+Use `FlameService.layer` to wire FLAME into Effect services and ensure shutdown happens automatically.
+
+```ts
+import { Effect } from "effect";
+import { FlameService } from "@flame/core";
+
+const program = Effect.gen(function* () {
+  const flame = yield* FlameService;
+  const ping = flame.fn("ping", async () => "pong");
+  return yield* Effect.tryPromise({
+    try: () => ping(),
+    catch: (error) => (error instanceof Error ? error : new Error(String(error)))
+  });
+});
+
+const layer = FlameService.layer({ mode: "local" });
+const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
+console.log(result);
+```
+
 ## Notes
 - Args/results are serialized with superjson; closures are not shipped.
 - If you need retries, set `retry` on `defineMethod` or service options.

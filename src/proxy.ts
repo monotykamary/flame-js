@@ -8,7 +8,7 @@ export const FLAME_META = Symbol.for("flame.meta");
 export interface FlameMeta {
   serviceId: string;
   methodId: string;
-  options?: FlameOptions;
+  options: FlameOptions | undefined;
   runtimeRef: RuntimeRef;
 }
 

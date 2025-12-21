@@ -18,8 +18,12 @@ export class FlameError extends Error {
     super(message);
     this.name = "FlameError";
     this.code = code;
-    this.details = options?.details;
-    this.retryable = options?.retryable;
+    if (options?.details !== undefined) {
+      this.details = options.details;
+    }
+    if (options?.retryable !== undefined) {
+      this.retryable = options.retryable;
+    }
   }
 }
 

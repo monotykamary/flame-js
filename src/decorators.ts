@@ -45,7 +45,15 @@ function normalizeMethodOptions(
   }
   if (!options) return {};
   const { id, serviceId, ...rest } = options;
-  return { id, serviceId, options: rest };
+  const result: { id?: string; serviceId?: string; options?: FlameOptions } = {};
+  if (id !== undefined) {
+    result.id = id;
+  }
+  if (serviceId !== undefined) {
+    result.serviceId = serviceId;
+  }
+  result.options = rest;
+  return result;
 }
 
 function normalizeServiceOptions(
@@ -53,11 +61,29 @@ function normalizeServiceOptions(
   options?: FlameOptions
 ): { id?: string; options?: FlameOptions; factory?: () => unknown } {
   if (typeof serviceIdOrOptions === "string") {
-    return { id: serviceIdOrOptions, options };
+    const result: { id?: string; options?: FlameOptions } = { id: serviceIdOrOptions };
+    if (options !== undefined) {
+      result.options = options;
+    }
+    return result;
   }
-  if (!serviceIdOrOptions) return { options };
+  if (!serviceIdOrOptions) {
+    const result: { options?: FlameOptions } = {};
+    if (options !== undefined) {
+      result.options = options;
+    }
+    return result;
+  }
   const { id, factory, ...rest } = serviceIdOrOptions;
-  return { id, options: rest, factory };
+  const result: { id?: string; options?: FlameOptions; factory?: () => unknown } = {};
+  if (id !== undefined) {
+    result.id = id;
+  }
+  if (factory !== undefined) {
+    result.factory = factory;
+  }
+  result.options = rest;
+  return result;
 }
 
 function mergeOptions(service?: FlameOptions, method?: FlameOptions): FlameOptions | undefined {
@@ -93,7 +119,12 @@ function createHandler(target: Function, meta: ServiceMeta, method: MethodMeta):
     return method.original.apply(instance, args);
   };
 
-  return { id: method.id, handler, options: mergeOptions(meta.options, method.options) };
+  const options = mergeOptions(meta.options, method.options);
+  const definition: MethodDefinition = { id: method.id, handler };
+  if (options !== undefined) {
+    definition.options = options;
+  }
+  return definition;
 }
 
 function registerDecoratedService(
@@ -111,7 +142,14 @@ function registerDecoratedService(
     }
   }
 
-  registry.registerService({ id: serviceId, methods, options: meta.options });
+  const service: { id: string; methods: Map<string, MethodDefinition>; options?: FlameOptions } = {
+    id: serviceId,
+    methods
+  };
+  if (meta.options !== undefined) {
+    service.options = meta.options;
+  }
+  registry.registerService(service);
 }
 
 function attachFlameMeta(
@@ -198,11 +236,13 @@ export function createDecorators(
       const methodId = normalized.id ?? String(propertyKey);
       const methodMeta: MethodMeta = {
         id: methodId,
-        options: normalized.options,
         original: descriptor.value as (...args: any[]) => any,
         isStatic,
         wrapped: false
       };
+      if (normalized.options !== undefined) {
+        methodMeta.options = normalized.options;
+      }
 
       serviceMeta.methods.set(propertyKey, methodMeta);
       wrapMethod(ctor, propertyKey, descriptor, serviceMeta, methodMeta, runtimeRef);
@@ -240,7 +280,6 @@ export function createDecorators(
         const existing = serviceMeta.methods.get(key);
         const methodMeta: MethodMeta = existing ?? {
           id: key,
-          options: undefined,
           original: descriptor.value,
           isStatic: false,
           wrapped: false

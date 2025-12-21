@@ -1,4 +1,5 @@
 export { flame, createFlame, flameService } from "./flame";
+export { FlameService } from "./flame-service";
 export { defineMethod } from "./define";
 export { createRegistry } from "./registry";
 export { createRunnerServer } from "./runner/server";

@@ -24,11 +24,12 @@ export function buildInvocationRequest(
     serviceId,
     methodId,
     args: serialize(args),
-    timeoutMs,
-    trace: undefined,
-    idempotencyKey: options?.idempotencyKey,
     iat: now,
-    exp: now + expiryWindow
+    exp: now + expiryWindow,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(options?.idempotencyKey !== undefined
+      ? { idempotencyKey: options.idempotencyKey }
+      : {})
   };
 
   const body = JSON.stringify(payload);
@@ -40,7 +41,14 @@ export function buildInvocationRequest(
     headers["x-flame-signature"] = signBody(body, config.security.secret);
   }
 
-  return { body, headers, timeoutMs };
+  const result: { body: string; headers: Record<string, string>; timeoutMs?: number } = {
+    body,
+    headers
+  };
+  if (timeoutMs !== undefined) {
+    result.timeoutMs = timeoutMs;
+  }
+  return result;
 }
 
 export async function invokeRemote<Result>(
@@ -79,10 +87,14 @@ export async function invokeRemote<Result>(
     }
 
     if (!payload.ok) {
-      throw new InvokeError("remote_error", payload.error.message, {
-        details: payload.error.details,
-        retryable: payload.error.retryable
-      });
+      const errorOptions: { details?: unknown; retryable?: boolean } = {};
+      if (payload.error.details !== undefined) {
+        errorOptions.details = payload.error.details;
+      }
+      if (payload.error.retryable !== undefined) {
+        errorOptions.retryable = payload.error.retryable;
+      }
+      throw new InvokeError("remote_error", payload.error.message, errorOptions);
     }
 
     return deserialize<Result>(payload.result);
@@ -91,7 +103,14 @@ export async function invokeRemote<Result>(
       throw error;
     }
     if (error instanceof FlameError) {
-      throw new InvokeError(error.code, error.message, { details: error.details, retryable: error.retryable });
+      const errorOptions: { details?: unknown; retryable?: boolean } = {};
+      if (error.details !== undefined) {
+        errorOptions.details = error.details;
+      }
+      if (error.retryable !== undefined) {
+        errorOptions.retryable = error.retryable;
+      }
+      throw new InvokeError(error.code, error.message, errorOptions);
     }
     if (error instanceof Error && error.name === "AbortError") {
       throw new InvokeError("timeout", "Invocation timed out", { retryable: true });

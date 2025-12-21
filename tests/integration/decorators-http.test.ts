@@ -22,7 +22,7 @@ function setupDecorated(flame: ReturnType<typeof createFlame>) {
 describe("decorators over http", () => {
   it("invokes decorated methods remotely", async () => {
     const runner = createFlame({ mode: "runner" });
-    const runnerService = setupDecorated(runner);
+    setupDecorated(runner);
 
     const server = runner.createRunnerServer({ port: 0, security: { secret: SECRET } });
 

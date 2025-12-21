@@ -135,16 +135,32 @@ export function createFlame(initialConfig: FlameConfig = {}): FlameInstance {
     return proxy.default as (...args: Parameters<T>) => any;
   };
 
-  const createRunner = (options?: Omit<RunnerServerOptions, "registry">) =>
-    createRunnerServer({
-      registry,
-      invokePath: options?.invokePath ?? currentConfig.invokePath,
-      maxBodyBytes: options?.maxBodyBytes ?? currentConfig.maxBodyBytes,
-      exposeErrors: options?.exposeErrors ?? currentConfig.exposeErrors,
-      security: options?.security ?? currentConfig.security,
-      port: options?.port,
-      hostname: options?.hostname
-    });
+  const createRunner = (options?: Omit<RunnerServerOptions, "registry">) => {
+    const runnerOptions: RunnerServerOptions = { registry };
+    const invokePath = options?.invokePath ?? currentConfig.invokePath;
+    if (invokePath !== undefined) {
+      runnerOptions.invokePath = invokePath;
+    }
+    const maxBodyBytes = options?.maxBodyBytes ?? currentConfig.maxBodyBytes;
+    if (maxBodyBytes !== undefined) {
+      runnerOptions.maxBodyBytes = maxBodyBytes;
+    }
+    const exposeErrors = options?.exposeErrors ?? currentConfig.exposeErrors;
+    if (exposeErrors !== undefined) {
+      runnerOptions.exposeErrors = exposeErrors;
+    }
+    const security = options?.security ?? currentConfig.security;
+    if (security !== undefined) {
+      runnerOptions.security = security;
+    }
+    if (options?.port !== undefined) {
+      runnerOptions.port = options.port;
+    }
+    if (options?.hostname !== undefined) {
+      runnerOptions.hostname = options.hostname;
+    }
+    return createRunnerServer(runnerOptions);
+  };
 
   const flame = ((options?: FlameMethodDecoratorOptions | string) =>
     decorators.method(options)) as FlameInstance;

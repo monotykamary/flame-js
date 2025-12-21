@@ -33,7 +33,7 @@ function resolvePoolConfig(
 export function createPoolManager(config: PoolManagerConfig): PoolManager {
   const pools = new Map<string, Pool>();
 
-  const get = (name: string) =>
+  const get = Effect.fn("PoolManager.get")((name: string) =>
     Effect.gen(function* (_) {
       const existing = pools.get(name);
       if (existing) {
@@ -48,13 +48,16 @@ export function createPoolManager(config: PoolManagerConfig): PoolManager {
       const pool = yield* _(createPool(name, poolConfig, config.backend));
       pools.set(name, pool);
       return pool;
-    });
+    })
+  );
 
-  const shutdownAll = Effect.gen(function* (_) {
-    for (const pool of pools.values()) {
-      yield* _(pool.shutdown);
-    }
-  });
+  const shutdownAll = Effect.fn("PoolManager.shutdownAll")(() =>
+    Effect.gen(function* (_) {
+      for (const pool of pools.values()) {
+        yield* _(pool.shutdown);
+      }
+    })
+  )();
 
   return { get, shutdownAll };
 }

@@ -67,12 +67,13 @@ export function createRunnerServer(options: RunnerServerOptions): RunnerServer {
       try {
         args = deserialize<unknown[]>(payload.args);
       } catch (error) {
+        const details = options.exposeErrors ? error : undefined;
         return Response.json({
           ok: false,
           error: {
             code: "serialization_error",
             message: "Failed to deserialize arguments",
-            details: options.exposeErrors ? error : undefined,
+            ...(details !== undefined ? { details } : {}),
             retryable: false
           }
         } satisfies InvocationResponse);
@@ -94,7 +95,7 @@ export function createRunnerServer(options: RunnerServerOptions): RunnerServer {
         invocationId: payload.invocationId,
         deadline,
         signal: controller.signal,
-        trace: payload.trace
+        ...(payload.trace ? { trace: payload.trace } : {})
       };
 
       try {
@@ -114,6 +115,12 @@ export function createRunnerServer(options: RunnerServerOptions): RunnerServer {
         return Response.json({ ok: true, result: serialize(result) } satisfies InvocationResponse);
       } catch (error) {
         const invokeError = error instanceof InvokeError ? error : undefined;
+        const details = options.exposeErrors
+          ? error instanceof Error
+            ? { name: error.name, message: error.message, stack: error.stack }
+            : error
+          : undefined;
+
         const response: InvocationResponse = {
           ok: false,
           error: {
@@ -122,12 +129,10 @@ export function createRunnerServer(options: RunnerServerOptions): RunnerServer {
               error instanceof Error
                 ? error.message
                 : "Handler threw an error",
-            details: options.exposeErrors
-              ? error instanceof Error
-                ? { name: error.name, message: error.message, stack: error.stack }
-                : error
-              : undefined,
-            retryable: invokeError?.retryable
+            ...(details !== undefined ? { details } : {}),
+            ...(invokeError?.retryable !== undefined
+              ? { retryable: invokeError.retryable }
+              : {})
           }
         };
         return Response.json(response);

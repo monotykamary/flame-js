@@ -102,6 +102,7 @@ describe("decorators", () => {
         return { value: this.value, calls: this.calls };
       }
     }
+    void FactoryService;
 
     const service = flame.registry.getService("factory");
     const handler = service?.methods.get("ping")?.handler;

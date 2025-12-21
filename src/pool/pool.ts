@@ -41,7 +41,7 @@ export function createPool(
     const queue = yield* _(Queue.unbounded<RunnerHandle>());
     const stateRef = yield* _(Ref.make<PoolState>({ runners: new Map(), spawning: 0 }));
 
-    const addRunner = (handle: RunnerHandle) =>
+    const addRunner = Effect.fn(`Pool.addRunner:${name}`)((handle: RunnerHandle) =>
       Effect.gen(function* (__): Generator<any, void, any> {
         const added = yield* __(
           Ref.modify(stateRef, (state) => {
@@ -59,9 +59,11 @@ export function createPool(
             yield* __(Queue.offer(queue, handle));
           }
         }
-      });
+      })
+    );
 
-    const spawnRunner = Effect.gen(function* (__): Generator<any, RunnerHandle, any> {
+    const spawnRunner = Effect.fn(`Pool.spawnRunner:${name}`)(() =>
+      Effect.gen(function* (__): Generator<any, RunnerHandle, any> {
       if (!backend) {
         throw new InvokeError("config_error", "No backend configured to spawn runners");
       }
@@ -93,7 +95,8 @@ export function createPool(
 
       yield* __(addRunner(handle));
       return handle;
-    });
+    })
+    );
 
     // Seed static runners
     for (const [index, runner] of cfg.runners.entries()) {
@@ -111,7 +114,7 @@ export function createPool(
       }
       const toSpawn = cfg.min - runnerCount;
       for (let i = 0; i < toSpawn; i += 1) {
-        yield* _(spawnRunner);
+        yield* _(spawnRunner());
       }
     }
 
@@ -145,7 +148,7 @@ export function createPool(
       }
 
       if (canSpawn) {
-        yield* __(spawnRunner);
+        yield* __(spawnRunner());
       }
 
       const handle = yield* __(Queue.take(queue));
@@ -164,9 +167,9 @@ export function createPool(
         return yield* __(acquire);
       }
       return handle;
-    }) as Effect.Effect<RunnerHandle, Error>;
+    }).pipe(Effect.withSpan(`Pool.acquire:${name}`)) as Effect.Effect<RunnerHandle, Error>;
 
-    const release = (runner: RunnerHandle) =>
+    const release = Effect.fn(`Pool.release:${name}`)((runner: RunnerHandle) =>
       Effect.gen(function* (__): Generator<any, void, any> {
         yield* __(
           Ref.update(stateRef, (state) => {
@@ -182,7 +185,8 @@ export function createPool(
           })
         );
         yield* __(Queue.offer(queue, runner));
-      }) as Effect.Effect<void, Error>;
+      })
+    ) as (runner: RunnerHandle) => Effect.Effect<void, Error>;
 
     const shutdown = Effect.gen(function* (__): Generator<any, void, any> {
       const state = yield* __(Ref.get(stateRef));
@@ -199,7 +203,7 @@ export function createPool(
           );
         }
       }
-    }) as Effect.Effect<void, Error>;
+    }).pipe(Effect.withSpan(`Pool.shutdown:${name}`)) as Effect.Effect<void, Error>;
 
     return { name, acquire, release, shutdown };
   }) as Effect.Effect<Pool, Error>;
