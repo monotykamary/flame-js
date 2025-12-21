@@ -6,6 +6,7 @@ describe("flame config", () => {
   it("merges config on configure and supports fn", async () => {
     const flame = createFlame({
       mode: "local",
+      defaultPool: "default",
       pools: { default: { runners: [{ url: "http://runner" }] } }
     });
 

@@ -100,6 +100,14 @@ describe("runner server", () => {
     await server.stop();
   });
 
+  it("uses custom hostnames", async () => {
+    const runner = createFlame({ mode: "runner" });
+    const server = runner.createRunnerServer({ port: 0, hostname: "127.0.0.1" });
+
+    expect(server.hostname).toBe("127.0.0.1");
+    await server.stop();
+  });
+
   it("rejects unknown methods", async () => {
     const runner = createFlame({ mode: "runner" });
     const server = runner.createRunnerServer({ port: 0 });

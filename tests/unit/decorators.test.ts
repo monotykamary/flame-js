@@ -89,6 +89,21 @@ describe("decorators", () => {
     expect(flame.registry.getService("DefaultNamedService")).toBeDefined();
   });
 
+  it("accepts options as the second decorator argument", async () => {
+    const flame = createFlame({ mode: "local" });
+
+    @flame.serviceDecorator(undefined, { pool: "default" })
+    class OptionalOptionsService {
+      async ping() {
+        return "pong";
+      }
+    }
+
+    const service = new OptionalOptionsService();
+    expect(await service.ping()).toBe("pong");
+    expect(flame.registry.getService("OptionalOptionsService")?.options?.pool).toBe("default");
+  });
+
   it("supports service factories", async () => {
     const flame = createFlame({ mode: "local" });
     let calls = 0;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { defineMethod, normalizeMethods } from "../../src/define";
+import { defineMethod, normalizeMethods, registerService } from "../../src/define";
+import { createRegistry } from "../../src/registry";
 
 
 describe("defineMethod", () => {
@@ -14,5 +15,15 @@ describe("defineMethod", () => {
     const ctx = { invocationId: "1", deadline: null, signal: new AbortController().signal };
     const result = await normalized.byProperty.charge.handler(ctx, 2);
     expect(result).toBe(4);
+  });
+
+  it("registers service options", () => {
+    const registry = createRegistry();
+    const method = defineMethod("ping", async () => "pong");
+    const normalized = normalizeMethods({ ping: method });
+
+    registerService(registry, "svc", normalized.byId, { pool: "default" });
+    const service = registry.getService("svc");
+    expect(service?.options?.pool).toBe("default");
   });
 });

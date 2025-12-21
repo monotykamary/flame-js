@@ -19,4 +19,20 @@ describe("flame service", () => {
     const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
     expect(result).toBe("pong");
   });
+
+  it("swallows shutdown failures in the layer finalizer", async () => {
+    const layer = FlameService.layer({ mode: "local" });
+    const program = Effect.gen(function* () {
+      const flame = yield* FlameService;
+      flame.shutdown = async () => {
+        throw "boom";
+      };
+      return "ok";
+    });
+
+    const result = await Effect.runPromise(
+      Effect.scoped(program.pipe(Effect.provide(layer)))
+    );
+    expect(result).toBe("ok");
+  });
 });
