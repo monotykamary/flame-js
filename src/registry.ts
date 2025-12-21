@@ -31,6 +31,18 @@ export function createRegistry(): FlameRegistry {
     registerService(service) {
       const existing = services.get(service.id);
       if (existing) {
+        if (service.options && existing.options && service.options !== existing.options) {
+          throw new RegistryError(`Service already registered with different options: ${service.id}`);
+        }
+        for (const [methodId, method] of service.methods.entries()) {
+          const current = existing.methods.get(methodId);
+          if (current && current.handler !== method.handler) {
+            throw new RegistryError(`Method already registered: ${service.id}.${methodId}`);
+          }
+          if (!current) {
+            existing.methods.set(methodId, method);
+          }
+        }
         return existing;
       }
       services.set(service.id, service);

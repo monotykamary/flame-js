@@ -9,6 +9,12 @@ import {
   toEffect as toEffectFn
 } from "./proxy";
 import { createRunnerServer, type RunnerServer, type RunnerServerOptions } from "./runner/server";
+import {
+  createDecorators,
+  type FlameMethodDecorator,
+  type FlameMethodDecoratorOptions,
+  type FlameServiceDecorator
+} from "./decorators";
 
 type MethodInput = FlameMethod<any[], any> | ((...args: any[]) => Promise<any> | any);
 type MethodProxy<M> = M extends FlameMethod<infer Args, infer Result>
@@ -22,7 +28,9 @@ type MethodEffectProxy<M> = M extends FlameMethod<infer Args, infer Result>
     ? (...args: Args) => Effect.Effect<Result, Error>
     : never;
 
-export interface FlameInstance {
+export type FlameDecorator = FlameMethodDecorator;
+
+export interface FlameInstance extends FlameDecorator {
   registry: ReturnType<typeof createRegistry>;
   configure: (config: FlameConfig) => Promise<void>;
   shutdown: () => Promise<void>;
@@ -36,18 +44,19 @@ export interface FlameInstance {
     methods: T,
     options?: FlameOptions
   ) => { [K in keyof T]: MethodEffectProxy<T[K]> };
-  fn: <T extends (...args: any[]) => Promise<any>>(
+  fn: <T extends (...args: any[]) => Promise<any> | any>(
     functionId: string,
     handler: T,
     options?: FlameOptions
   ) => T;
-  fnEffect: <T extends (...args: any[]) => Promise<any>>(
+  fnEffect: <T extends (...args: any[]) => Promise<any> | any>(
     functionId: string,
     handler: T,
     options?: FlameOptions
   ) => (...args: Parameters<T>) => any;
   toEffect: typeof toEffectFn;
   defineMethod: typeof defineMethod;
+  serviceDecorator: FlameServiceDecorator;
   createRunnerServer: (options?: Omit<RunnerServerOptions, "registry">) => RunnerServer;
 }
 
@@ -67,6 +76,7 @@ export function createFlame(initialConfig: FlameConfig = {}): FlameInstance {
   let currentConfig = initialConfig;
   let runtime: FlameRuntime = createRuntime(currentConfig, registry);
   const runtimeRef: RuntimeRef = { current: runtime };
+  const decorators = createDecorators(runtimeRef, registry);
 
   const configure = async (config: FlameConfig) => {
     currentConfig = mergeConfig(currentConfig, config);
@@ -136,18 +146,23 @@ export function createFlame(initialConfig: FlameConfig = {}): FlameInstance {
       hostname: options?.hostname
     });
 
-  return {
-    registry,
-    configure,
-    shutdown,
-    service,
-    serviceEffect,
-    fn,
-    fnEffect,
-    toEffect: toEffectFn,
-    defineMethod,
-    createRunnerServer: createRunner
-  };
+  const flame = ((options?: FlameMethodDecoratorOptions | string) =>
+    decorators.method(options)) as FlameInstance;
+
+  flame.registry = registry;
+  flame.configure = configure;
+  flame.shutdown = shutdown;
+  flame.service = service;
+  flame.serviceEffect = serviceEffect;
+  flame.fn = fn;
+  flame.fnEffect = fnEffect;
+  flame.toEffect = toEffectFn;
+  flame.defineMethod = defineMethod;
+  flame.serviceDecorator = decorators.service;
+  flame.createRunnerServer = createRunner;
+
+  return flame;
 }
 
 export const flame = createFlame();
+export const flameService: FlameServiceDecorator = (...args) => flame.serviceDecorator(...args);

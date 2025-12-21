@@ -37,4 +37,25 @@ describe("registry", () => {
     const registry = createRegistry();
     expect(() => getMethod(registry, "missing", "method")).toThrow();
   });
+
+  it("merges methods for repeated registration", async () => {
+    const registry = createRegistry();
+    const one = async () => 1;
+    const two = async () => 2;
+
+    registry.registerService({
+      id: "svc",
+      methods: new Map([["one", { id: "one", handler: one }]])
+    });
+
+    registry.registerService({
+      id: "svc",
+      methods: new Map([["two", { id: "two", handler: two }]])
+    });
+
+    const oneMethod = getMethod(registry, "svc", "one");
+    const twoMethod = getMethod(registry, "svc", "two");
+    expect(oneMethod.handler).toBe(one);
+    expect(twoMethod.handler).toBe(two);
+  });
 });

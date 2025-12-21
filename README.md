@@ -50,6 +50,30 @@ await flame.configure({
 flame.createRunnerServer({ port: 8080, security: { secret: process.env.FLAME_SECRET ?? "dev-secret" } });
 ```
 
+### Decorators
+
+Decorators use TypeScript's experimental decorators. Ensure `experimentalDecorators` is enabled in `tsconfig.json`.
+
+```ts
+import { flame, flameService } from "@flame/core";
+
+@flameService("billing", { pool: "default" })
+class BillingService {
+  @flame({ id: "charge", pool: "gpu" })
+  async charge(amount: number) {
+    return { ok: true, charged: amount };
+  }
+
+  async refund(amount: number) {
+    return { ok: true, refunded: amount };
+  }
+}
+
+const service = new BillingService();
+await service.charge(50);
+await service.refund(10);
+```
+
 ## Notes
 - Args/results are serialized with superjson; closures are not shipped.
 - If you need retries, set `retry` on `defineMethod` or service options.
