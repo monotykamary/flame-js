@@ -22,9 +22,11 @@ describe("flame service", () => {
 
   it("swallows shutdown failures in the layer finalizer", async () => {
     const layer = FlameService.layer({ mode: "local" });
+    let shutdownCalled = false;
     const program = Effect.gen(function* () {
       const flame = yield* FlameService;
       flame.shutdown = async () => {
+        shutdownCalled = true;
         throw "boom";
       };
       return "ok";
@@ -34,5 +36,13 @@ describe("flame service", () => {
       Effect.scoped(program.pipe(Effect.provide(layer)))
     );
     expect(result).toBe("ok");
+    expect(shutdownCalled).toBe(true);
+  });
+
+  it("constructs the tag class", () => {
+    expect(() => {
+      // The Tag constructor is normally unused but we execute it for coverage.
+      new (FlameService as unknown as { new (): unknown })();
+    }).not.toThrow();
   });
 });

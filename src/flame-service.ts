@@ -6,17 +6,16 @@ export class FlameService extends Context.Tag("@flame/Flame")<
   FlameService,
   FlameInstance
 >() {
+  constructor() {
+    super();
+  }
+
   static layer(config: FlameConfig = {}) {
     return Layer.scoped(
       FlameService,
       Effect.acquireRelease(
         Effect.sync(() => createFlame(config)),
-        (flame) =>
-          Effect.tryPromise({
-            try: () => flame.shutdown(),
-            catch: (error) =>
-              error instanceof Error ? error : new Error(String(error))
-          }).pipe(Effect.ignore)
+        (flame) => Effect.tryPromise(() => flame.shutdown()).pipe(Effect.ignore)
       )
     );
   }

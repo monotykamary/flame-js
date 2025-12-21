@@ -1,13 +1,20 @@
 import { describe, expect, it } from "bun:test";
+import { Effect } from "effect";
 import { createFlame } from "../../src";
 
 
 describe("flame config", () => {
   it("merges config on configure and supports fn", async () => {
+    const backend = {
+      spawn: () => Effect.succeed({ id: "runner-1", url: "http://runner" }),
+      terminate: () => Effect.void
+    };
+
     const flame = createFlame({
       mode: "local",
       defaultPool: "default",
-      pools: { default: { runners: [{ url: "http://runner" }] } }
+      pools: { default: { runners: [{ url: "http://runner" }] } },
+      backend
     });
 
     await flame.configure({

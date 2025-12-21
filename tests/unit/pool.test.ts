@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
+import { Effect, Ref } from "effect";
 import { createPool } from "../../src/pool/pool";
 
 
@@ -19,6 +19,32 @@ describe("pool", () => {
     const pool = await Effect.runPromise(createPool("empty", { max: 0 }));
 
     await expect(Effect.runPromise(pool.acquire)).rejects.toThrow();
+  });
+
+  it("fails spawnRunner without a backend", async () => {
+    const pool = await Effect.runPromise(createPool("no-backend", { max: 1 }));
+    const internals = (pool as any)[Symbol.for("flame.pool.internals")];
+
+    await expect(Effect.runPromise(internals.spawnRunner())).rejects.toThrow(
+      "No backend configured"
+    );
+  });
+
+  it("fails spawnRunner when max runners are reached", async () => {
+    const backend = {
+      spawn: () => Effect.succeed({ id: "runner-1", url: "http://spawned" }),
+      terminate: () => Effect.void
+    };
+    const pool = await Effect.runPromise(createPool("maxed", { max: 1 }, backend));
+    const internals = (pool as any)[Symbol.for("flame.pool.internals")];
+
+    await Effect.runPromise(
+      Ref.update(internals.stateRef, (state: any) => ({ ...state, spawning: 1 }))
+    );
+
+    await expect(Effect.runPromise(internals.spawnRunner())).rejects.toThrow(
+      "reached max runners"
+    );
   });
 
   it("ignores duplicate static runner ids", async () => {

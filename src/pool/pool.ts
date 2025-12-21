@@ -2,6 +2,8 @@ import { Effect, Queue, Ref, Option } from "effect";
 import type { PoolConfig, RunnerHandle, Backend } from "./types";
 import { InvokeError } from "../errors";
 
+const POOL_INTERNALS = Symbol.for("flame.pool.internals");
+
 export interface Pool {
   name: string;
   acquire: Effect.Effect<RunnerHandle, Error>;
@@ -18,6 +20,11 @@ interface RunnerState {
 interface PoolState {
   runners: Map<string, RunnerState>;
   spawning: number;
+}
+
+interface PoolInternals {
+  spawnRunner: () => Effect.Effect<RunnerHandle, Error>;
+  stateRef: Ref.Ref<PoolState>;
 }
 
 function normalizeConfig(config: PoolConfig) {
@@ -191,6 +198,11 @@ export function createPool(
       }
     }).pipe(Effect.withSpan(`Pool.shutdown:${name}`)) as Effect.Effect<void, Error>;
 
-    return { name, acquire, release, shutdown };
+    const pool: Pool = { name, acquire, release, shutdown };
+    Object.defineProperty(pool, POOL_INTERNALS, {
+      value: { spawnRunner, stateRef } satisfies PoolInternals,
+      enumerable: false
+    });
+    return pool;
   }) as Effect.Effect<Pool, Error>;
 }
