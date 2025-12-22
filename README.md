@@ -1,4 +1,4 @@
-# @flame/core
+# @monotykamary/flame
 
 [![codecov](https://codecov.io/gh/monotykamary/flame-js/branch/main/graph/badge.svg)](https://codecov.io/gh/monotykamary/flame-js)
 
@@ -58,13 +58,13 @@ Mode resolution:
 ## Install
 
 ```bash
-npm install @flame/core
+npm install @monotykamary/flame
 # or
-pnpm add @flame/core
+pnpm add @monotykamary/flame
 # or
-yarn add @flame/core
+yarn add @monotykamary/flame
 # or
-bun add @flame/core
+bun add @monotykamary/flame
 ```
 
 Note: the package currently exports TypeScript source. Use Bun or a TS-aware bundler/runtime.
@@ -74,7 +74,7 @@ Note: the package currently exports TypeScript source. Use Bun or a TS-aware bun
 ### 1) Define services (shared module)
 
 ```ts
-import { flame, defineMethod } from "@flame/core";
+import { flame, defineMethod } from "@monotykamary/flame";
 
 export const Billing = flame.service.billing({
   charge: defineMethod.charge(async (_ctx, req: { amount: number }) => {
@@ -86,7 +86,7 @@ export const Billing = flame.service.billing({
 ### 2) Parent entrypoint
 
 ```ts
-import { flame } from "@flame/core";
+import { flame } from "@monotykamary/flame";
 import "./services";
 
 await flame.configure({
@@ -102,7 +102,7 @@ console.log(result);
 ### 3) Runner entrypoint
 
 ```ts
-import { flame } from "@flame/core";
+import { flame } from "@monotykamary/flame";
 import "./services";
 
 await flame.configure({
@@ -119,7 +119,7 @@ flame.createRunnerServer({
 ### 4) Local mode (in-process)
 
 ```ts
-import { flame } from "@flame/core";
+import { flame } from "@monotykamary/flame";
 import "./services";
 
 await flame.configure({ mode: "local" });
@@ -136,7 +136,7 @@ console.log(result);
 - Handlers receive `InvocationContext` first:
 
 ```ts
-import { defineMethod } from "@flame/core";
+import { defineMethod } from "@monotykamary/flame";
 
 const handler = defineMethod.charge(async (ctx, req: { amount: number }) => {
   if (ctx.deadline && Date.now() > ctx.deadline) throw new Error("expired");
@@ -157,7 +157,7 @@ const result = await ping();
 
 ```ts
 import { Effect } from "effect";
-import { FlameService } from "@flame/core";
+import { FlameService } from "@monotykamary/flame";
 
 const program = Effect.gen(function* () {
   const flame = yield* FlameService;
@@ -222,7 +222,7 @@ Effect boundary:
 Enable `experimentalDecorators` in `tsconfig.json`.
 
 ```ts
-import { flame, flameService } from "@flame/core";
+import { flame, flameService } from "@monotykamary/flame";
 
 @flameService("billing", { pool: "default" })
 class BillingService {

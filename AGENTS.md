@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project snapshot
-- Package: `@flame/core` (TypeScript, Bun, Effect)
+- Package: `@monotykamary/flame` (TypeScript, Bun, Effect)
 - Purpose: FLAME-style remote execution with parent/runner/local modes
 - Entry point: `src/index.ts`
 

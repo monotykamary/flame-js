@@ -2,14 +2,10 @@ import { Context, Effect, Layer } from "effect";
 import type { FlameConfig } from "./types";
 import { createFlame, type FlameInstance } from "./flame";
 
-export class FlameService extends Context.Tag("@flame/Flame")<
+export class FlameService extends Context.Tag("FlameService")<
   FlameService,
   FlameInstance
 >() {
-  constructor() {
-    super();
-  }
-
   static layer(config: FlameConfig = {}) {
     return Layer.scoped(
       FlameService,

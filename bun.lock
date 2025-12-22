@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@flame/core",
+      "name": "@monotykamary/flame",
       "dependencies": {
         "effect": "^3.6.5",
         "superjson": "^2.2.2",
