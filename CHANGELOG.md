@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.2](https://github.com/monotykamary/flame-js/compare/v0.1.1...v0.1.2) (2025-12-22)
+
+
+### Features
+
+* add proxy-based id helpers ([dc42b76](https://github.com/monotykamary/flame-js/commit/dc42b765cebf4cac2bfe9259a8eb68b2aa0b943b))
+
 ### 0.1.1 (2025-12-21)
 
 
