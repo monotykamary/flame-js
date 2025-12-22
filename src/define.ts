@@ -1,5 +1,6 @@
 import type { FlameOptions } from "./types";
 import type { FlameHandler, MethodDefinition, ServiceDefinition, FlameRegistry } from "./registry";
+import { createNamedProxy } from "./named-proxy";
 
 export interface FlameMethod<Args extends unknown[] = unknown[], Result = unknown> {
   id: string;
@@ -8,7 +9,7 @@ export interface FlameMethod<Args extends unknown[] = unknown[], Result = unknow
   __flameMethod: true;
 }
 
-export function defineMethod<Args extends unknown[], Result>(
+function defineMethodInternal<Args extends unknown[], Result>(
   id: string,
   handler: FlameHandler<Args, Result>,
   options?: FlameOptions
@@ -19,6 +20,20 @@ export function defineMethod<Args extends unknown[], Result>(
   }
   return method;
 }
+
+export type DefineMethod = {
+  <Args extends unknown[], Result>(
+    id: string,
+    handler: FlameHandler<Args, Result>,
+    options?: FlameOptions
+  ): FlameMethod<Args, Result>;
+  [key: string]: <Args extends unknown[], Result>(
+    handler: FlameHandler<Args, Result>,
+    options?: FlameOptions
+  ) => FlameMethod<Args, Result>;
+};
+
+export const defineMethod = createNamedProxy(defineMethodInternal) as DefineMethod;
 
 export function isFlameMethod(value: unknown): value is FlameMethod {
   return typeof value === "object" && value !== null && (value as FlameMethod).__flameMethod === true;

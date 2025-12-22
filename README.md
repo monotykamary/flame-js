@@ -76,8 +76,8 @@ Note: the package currently exports TypeScript source. Use Bun or a TS-aware bun
 ```ts
 import { flame, defineMethod } from "@flame/core";
 
-export const Billing = flame.service("billing", {
-  charge: defineMethod("charge", async (_ctx, req: { amount: number }) => {
+export const Billing = flame.service.billing({
+  charge: defineMethod.charge(async (_ctx, req: { amount: number }) => {
     return { ok: true, charged: req.amount };
   })
 });
@@ -131,14 +131,14 @@ console.log(result);
 
 ### Services and methods
 
-- `flame.service("serviceId", { method: handler })` defines a service.
-- `defineMethod("methodId", handler, options?)` assigns stable method IDs.
+- `flame.service.<serviceId>({ method: handler })` defines a service (or use `flame.service("serviceId", ...)`).
+- `defineMethod.<methodId>(handler, options?)` assigns method IDs (or use `defineMethod("methodId", ...)`).
 - Handlers receive `InvocationContext` first:
 
 ```ts
 import { defineMethod } from "@flame/core";
 
-const handler = defineMethod("charge", async (ctx, req: { amount: number }) => {
+const handler = defineMethod.charge(async (ctx, req: { amount: number }) => {
   if (ctx.deadline && Date.now() > ctx.deadline) throw new Error("expired");
   return { ok: true, charged: req.amount };
 });
@@ -147,7 +147,7 @@ const handler = defineMethod("charge", async (ctx, req: { amount: number }) => {
 ### Functions (single-method services)
 
 ```ts
-const ping = flame.fn("ping", async () => "pong");
+const ping = flame.fn.ping(async () => "pong");
 const result = await ping();
 ```
 
@@ -161,7 +161,7 @@ import { FlameService } from "@flame/core";
 
 const program = Effect.gen(function* () {
   const flame = yield* FlameService;
-  const ping = flame.fn("ping", async () => "pong");
+  const ping = flame.fn.ping(async () => "pong");
   return yield* Effect.tryPromise(() => ping());
 });
 

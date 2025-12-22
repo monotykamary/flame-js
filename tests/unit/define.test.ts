@@ -4,6 +4,18 @@ import { createRegistry } from "../../src/registry";
 
 
 describe("defineMethod", () => {
+  it("derives method ids from property access", async () => {
+    const method = defineMethod.charge(async (_ctx, amount: number) => amount + 1);
+    const normalized = normalizeMethods({ charge: method });
+
+    expect(normalized.byId.has("charge")).toBe(true);
+    expect(normalized.byProperty.charge.id).toBe("charge");
+
+    const ctx = { invocationId: "1", deadline: null, signal: new AbortController().signal };
+    const result = await normalized.byProperty.charge.handler(ctx, 2);
+    expect(result).toBe(3);
+  });
+
   it("keeps explicit method ids", async () => {
     const method = defineMethod("charge.v1", async (_ctx, amount: number) => amount * 2);
     const normalized = normalizeMethods({ charge: method, ping: async () => "pong" });
