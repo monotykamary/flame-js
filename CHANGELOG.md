@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.4](https://github.com/monotykamary/flame-js/compare/v0.1.3...v0.1.4) (2026-02-19)
+
+
+### Features
+
+* unify fn error handling with return-first default ([065f5ea](https://github.com/monotykamary/flame-js/commit/065f5ea697e1d0744ee69099f419f5c3b431e0cd))
+
 ### [0.1.3](https://github.com/monotykamary/flame-js/compare/v0.1.2...v0.1.3) (2026-02-19)
 
 
