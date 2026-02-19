@@ -13,7 +13,8 @@ import {
 } from "./decorators";
 import { createNamedProxy } from "./named-proxy";
 
-type MethodInput = FlameMethod<any[], any> | ((...args: any[]) => Promise<any> | any);
+type FunctionHandler = (...args: any[]) => Promise<any> | any;
+type MethodInput = FlameMethod<any[], any> | FunctionHandler;
 type MethodProxy<M> = M extends FlameMethod<infer Args, infer Result>
   ? (...args: Args) => Promise<Result>
   : M extends (...args: infer Args) => Promise<infer Result>
@@ -26,6 +27,12 @@ type MethodResultProxy<M> = M extends FlameMethod<infer Args, infer Result>
     : M extends (...args: infer Args) => infer Result
       ? (...args: Args) => Promise<Result | FlameError>
       : never;
+type FnThrowOptions = FlameOptions & { errors: "throw" };
+type FnReturnOptions = FlameOptions & { errors?: "return" };
+type FnThrowProxy<T extends FunctionHandler> = (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>>;
+type FnResultProxy<T extends FunctionHandler> = (
+  ...args: Parameters<T>
+) => Promise<Awaited<ReturnType<T>> | FlameError>;
 
 export type FlameDecorator = FlameMethodDecorator;
 
@@ -55,15 +62,26 @@ type ServiceFactory = {
 };
 
 type FnFactory = {
-  <T extends (...args: any[]) => Promise<any> | any>(
+  <T extends FunctionHandler>(
     functionId: string,
     handler: T,
-    options?: FlameOptions
-  ): T;
-  [key: string]: <T extends (...args: any[]) => Promise<any> | any>(
+    options: FnThrowOptions
+  ): FnThrowProxy<T>;
+  <T extends FunctionHandler>(
+    functionId: string,
     handler: T,
-    options?: FlameOptions
-  ) => T;
+    options?: FnReturnOptions
+  ): FnResultProxy<T>;
+  [key: string]: {
+    <T extends FunctionHandler>(
+      handler: T,
+      options: FnThrowOptions
+    ): FnThrowProxy<T>;
+    <T extends FunctionHandler>(
+      handler: T,
+      options?: FnReturnOptions
+    ): FnResultProxy<T>;
+  };
 };
 
 type ServiceResultFactory = {
@@ -79,15 +97,15 @@ type ServiceResultFactory = {
 };
 
 type FnResultFactory = {
-  <T extends (...args: any[]) => Promise<any> | any>(
+  <T extends FunctionHandler>(
     functionId: string,
     handler: T,
     options?: FlameOptions
-  ): (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>> | FlameError>;
-  [key: string]: <T extends (...args: any[]) => Promise<any> | any>(
+  ): FnResultProxy<T>;
+  [key: string]: <T extends FunctionHandler>(
     handler: T,
     options?: FlameOptions
-  ) => (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>> | FlameError>;
+  ) => FnResultProxy<T>;
 };
 
 function mergeConfig(base: FlameConfig, next: FlameConfig): FlameConfig {
@@ -147,28 +165,49 @@ export function createFlame(initialConfig: FlameConfig = {}): FlameInstance {
 
   const serviceResult = createNamedProxy(serviceResultImpl) as ServiceResultFactory;
 
-  const fnImpl = <T extends (...args: any[]) => Promise<any> | any>(
+  function fnImpl<T extends FunctionHandler>(
+    functionId: string,
+    handler: T,
+    options: FnThrowOptions
+  ): FnThrowProxy<T>;
+  function fnImpl<T extends FunctionHandler>(
+    functionId: string,
+    handler: T,
+    options?: FnReturnOptions
+  ): FnResultProxy<T>;
+  function fnImpl<T extends FunctionHandler>(
     functionId: string,
     handler: T,
     options?: FlameOptions
-  ): T => {
+  ): FnThrowProxy<T> | FnResultProxy<T> {
     const normalized = normalizeMethods({ default: handler } as Record<string, any>);
     registerService(registry, functionId, normalized.byId, options);
-    const proxy = createServiceProxy(runtimeRef, functionId, normalized.byProperty, options);
-    return proxy.default as T;
-  };
+    const invocationStyle = options?.errors === "throw" ? "throw" : "result";
+    const proxy = createServiceProxy(
+      runtimeRef,
+      functionId,
+      normalized.byProperty,
+      options,
+      invocationStyle
+    );
+    if (invocationStyle === "throw") {
+      return proxy.default as FnThrowProxy<T>;
+    }
+    return proxy.default as FnResultProxy<T>;
+  }
 
   const fn = createNamedProxy(fnImpl) as FnFactory;
 
-  const fnResultImpl = <T extends (...args: any[]) => Promise<any> | any>(
+  const fnResultImpl = <T extends FunctionHandler>(
     functionId: string,
     handler: T,
     options?: FlameOptions
-  ): (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>> | FlameError> => {
-    const normalized = normalizeMethods({ default: handler } as Record<string, any>);
-    registerService(registry, functionId, normalized.byId, options);
-    const proxy = createServiceProxy(runtimeRef, functionId, normalized.byProperty, options, "result");
-    return proxy.default as (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>> | FlameError>;
+  ): FnResultProxy<T> => {
+    const resultOptions: FnReturnOptions = {
+      ...options,
+      errors: "return"
+    };
+    return fnImpl(functionId, handler, resultOptions);
   };
 
   const fnResult = createNamedProxy(fnResultImpl) as FnResultFactory;

@@ -23,6 +23,7 @@ export type {
 } from "./decorators";
 export type {
   FlameConfig,
+  ErrorHandlingMode,
   FlameOptions,
   InvocationRequest,
   InvocationResponse,

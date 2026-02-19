@@ -154,15 +154,15 @@ const result = await ping();
 ### Error handling
 
 FLAME supports both styles:
-- Union APIs: `flame.serviceResult` and `flame.fnResult` (errors returned as values).
-- Throwing APIs: `flame.service` and `flame.fn`.
+- Union APIs: `flame.fn` (default) and `flame.serviceResult` (errors returned as values).
+- Throwing APIs: `flame.service` and `flame.fn(..., { errors: "throw" })`.
 
 Union style (errore-like early returns):
 
 ```ts
 import { FlameError, NoRunnerError, TimeoutError, flame } from "@monotykamary/flame";
 
-const add = flame.fnResult("add", async (a: number, b: number) => a + b);
+const add = flame.fn("add", async (a: number, b: number) => a + b);
 const result = await add(2, 3);
 
 if (result instanceof TimeoutError) {
@@ -188,7 +188,9 @@ Throwing style is still available when you prefer exceptions:
 ```ts
 import { flame } from "@monotykamary/flame";
 
-const add = flame.fn("add", async (a: number, b: number) => a + b);
+const add = flame.fn("add", async (a: number, b: number) => a + b, {
+  errors: "throw"
+});
 
 try {
   const result = await add(2, 3);
@@ -309,6 +311,7 @@ class BillingService {
 | `pool` | `string` | Pool name override. |
 | `timeoutMs` | `number` | Request timeout for this call. |
 | `idempotencyKey` | `string` | Idempotency token passed to runners. |
+| `errors` | `"return" \| "throw"` | Error style for proxies (`fn` defaults to `"return"`). |
 | `retry.maxAttempts` | `number` | Retry count (parent side). |
 | `retry.baseDelayMs` | `number` | Exponential backoff base delay. |
 

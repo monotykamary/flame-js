@@ -59,10 +59,10 @@ describe("flame proxy ids", () => {
     }
   });
 
-  it("supports union-returning fn proxies", async () => {
+  it("defaults fn proxies to union-returning behavior", async () => {
     const flame = createFlame({ mode: "local" });
-    const ping = flame.fnResult.ping(async () => "pong");
-    const fail = flame.fnResult("boom", async () => {
+    const ping = flame.fn.ping(async () => "pong");
+    const fail = flame.fn("boom", async () => {
       throw new Error("boom");
     });
 
@@ -79,6 +79,28 @@ describe("flame proxy ids", () => {
     }
   });
 
+  it("supports throwing fn proxies when configured", async () => {
+    const flame = createFlame({ mode: "local" });
+    const fail = flame.fn("boom", async () => {
+      throw new Error("boom");
+    }, {
+      errors: "throw"
+    });
+
+    await expect(fail()).rejects.toThrow("Local invocation failed");
+  });
+
+  it("keeps fnResult as a compatibility alias", async () => {
+    const flame = createFlame({ mode: "local" });
+    const ping = flame.fnResult.ping(async () => "pong");
+    const result = await ping();
+
+    expect(result instanceof Error).toBe(false);
+    if (!(result instanceof Error)) {
+      expect(result).toBe("pong");
+    }
+  });
+
   it("returns errors as values in parent mode for result proxies", async () => {
     const flame = createFlame({
       mode: "parent",
@@ -89,6 +111,20 @@ describe("flame proxy ids", () => {
     });
 
     const result = await service.ping();
+    expect(result instanceof Error).toBe(true);
+    if (result instanceof Error) {
+      expect(result.message).toContain("Pool not configured");
+    }
+  });
+
+  it("returns errors as values in parent mode for fn by default", async () => {
+    const flame = createFlame({
+      mode: "parent",
+      pools: {}
+    });
+    const ping = flame.fn("ping", async () => "pong");
+    const result = await ping();
+
     expect(result instanceof Error).toBe(true);
     if (result instanceof Error) {
       expect(result.message).toContain("Pool not configured");

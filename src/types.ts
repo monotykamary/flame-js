@@ -2,6 +2,7 @@ import type { PoolConfig, Backend, RunnerHandle } from "./pool/types";
 import type { HmacConfig } from "./security";
 
 export type Mode = "parent" | "runner" | "local";
+export type ErrorHandlingMode = "throw" | "return";
 
 export interface FlameConfig {
   mode?: Mode;
@@ -21,6 +22,7 @@ export interface FlameOptions {
   pool?: string;
   timeoutMs?: number;
   idempotencyKey?: string;
+  errors?: ErrorHandlingMode;
   retry?: {
     maxAttempts?: number;
     baseDelayMs?: number;
