@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
+import { tryFn } from "errore";
 import { deserialize, serialize } from "./serialization";
-import { FlameError, InvokeError } from "./errors";
+import { FlameError, InvokeError, RemoteError, TimeoutError, TransportError } from "./errors";
 import { signBody } from "./security";
 import type { FlameConfig, FlameOptions, InvocationRequest, InvocationResponse, InvocationContext } from "./types";
 import type { FlameRegistry } from "./registry";
@@ -8,6 +9,30 @@ import { getMethod } from "./registry";
 import type { RunnerHandle } from "./pool/types";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+
+type InvokeErrorOptions = { details?: unknown; retryable?: boolean };
+
+function toInvokeErrorOptions(source: InvokeErrorOptions): InvokeErrorOptions {
+  return {
+    ...(source.details !== undefined ? { details: source.details } : {}),
+    ...(source.retryable !== undefined ? { retryable: source.retryable } : {})
+  };
+}
+
+function mapRemoteInvokeError(error: unknown): FlameError {
+  if (error instanceof FlameError) {
+    return error;
+  }
+
+  if (error instanceof Error && error.name === "AbortError") {
+    return new TimeoutError("Invocation timed out", { retryable: true });
+  }
+
+  return new TransportError("Failed to invoke runner", {
+    details: error,
+    retryable: true
+  });
+}
 
 export function buildInvocationRequest(
   serviceId: string,
@@ -75,47 +100,26 @@ export async function invokeRemote<Result>(
     });
 
     if (!response.ok) {
-      throw new InvokeError("transport_error", `Runner responded with ${response.status}`);
+      throw new TransportError(`Runner responded with ${response.status}`);
     }
 
     const text = await response.text();
-    let payload: InvocationResponse;
-    try {
-      payload = JSON.parse(text) as InvocationResponse;
-    } catch (error) {
-      throw new InvokeError("invoke_error", "Failed to parse runner response", { details: error });
+    const payload = tryFn({
+      try: () => JSON.parse(text) as InvocationResponse,
+      catch: (error: Error) =>
+        new InvokeError("Failed to parse runner response", { details: error })
+    });
+    if (payload instanceof Error) {
+      throw payload;
     }
 
     if (!payload.ok) {
-      const errorOptions: { details?: unknown; retryable?: boolean } = {};
-      if (payload.error.details !== undefined) {
-        errorOptions.details = payload.error.details;
-      }
-      if (payload.error.retryable !== undefined) {
-        errorOptions.retryable = payload.error.retryable;
-      }
-      throw new InvokeError("remote_error", payload.error.message, errorOptions);
+      throw new RemoteError(payload.error.message, toInvokeErrorOptions(payload.error));
     }
 
     return deserialize<Result>(payload.result);
   } catch (error) {
-    if (error instanceof InvokeError) {
-      throw error;
-    }
-    if (error instanceof FlameError) {
-      const errorOptions: { details?: unknown; retryable?: boolean } = {};
-      if (error.details !== undefined) {
-        errorOptions.details = error.details;
-      }
-      if (error.retryable !== undefined) {
-        errorOptions.retryable = error.retryable;
-      }
-      throw new InvokeError(error.code, error.message, errorOptions);
-    }
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new InvokeError("timeout", "Invocation timed out", { retryable: true });
-    }
-    throw new InvokeError("transport_error", "Failed to invoke runner", { details: error, retryable: true });
+    throw mapRemoteInvokeError(error);
   } finally {
     if (timeoutId) {
       clearTimeout(timeoutId);
@@ -144,16 +148,15 @@ export async function invokeLocal<Result>(
   };
 
   const run = Promise.resolve(method.handler(context, ...args));
+  if (!timeoutMs) {
+    return (await run) as Result;
+  }
 
   try {
-    if (!timeoutMs) {
-      return (await run) as Result;
-    }
-
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => {
         controller.abort();
-        reject(new InvokeError("timeout", "Invocation timed out", { retryable: true }));
+        reject(new TimeoutError("Invocation timed out", { retryable: true }));
       }, timeoutMs);
     });
 

@@ -1,14 +1,10 @@
-import type { Effect } from "effect";
 import type { FlameConfig, FlameOptions } from "./types";
 import { createRegistry } from "./registry";
 import { normalizeMethods, registerService, defineMethod, type FlameMethod } from "./define";
 import { createRuntime, type FlameRuntime, type RuntimeRef } from "./runtime";
-import {
-  createServiceProxy,
-  createServiceProxyEffect,
-  toEffect as toEffectFn
-} from "./proxy";
+import { createServiceProxy } from "./proxy";
 import { createRunnerServer, type RunnerServer, type RunnerServerOptions } from "./runner/server";
+import type { FlameError } from "./errors";
 import {
   createDecorators,
   type FlameMethodDecorator,
@@ -23,11 +19,13 @@ type MethodProxy<M> = M extends FlameMethod<infer Args, infer Result>
   : M extends (...args: infer Args) => Promise<infer Result>
     ? (...args: Args) => Promise<Result>
     : never;
-type MethodEffectProxy<M> = M extends FlameMethod<infer Args, infer Result>
-  ? (...args: Args) => Effect.Effect<Result, Error>
+type MethodResultProxy<M> = M extends FlameMethod<infer Args, infer Result>
+  ? (...args: Args) => Promise<Result | FlameError>
   : M extends (...args: infer Args) => Promise<infer Result>
-    ? (...args: Args) => Effect.Effect<Result, Error>
-    : never;
+    ? (...args: Args) => Promise<Result | FlameError>
+    : M extends (...args: infer Args) => infer Result
+      ? (...args: Args) => Promise<Result | FlameError>
+      : never;
 
 export type FlameDecorator = FlameMethodDecorator;
 
@@ -36,10 +34,9 @@ export interface FlameInstance extends FlameDecorator {
   configure: (config: FlameConfig) => Promise<void>;
   shutdown: () => Promise<void>;
   service: ServiceFactory;
-  serviceEffect: ServiceEffectFactory;
   fn: FnFactory;
-  fnEffect: FnEffectFactory;
-  toEffect: typeof toEffectFn;
+  serviceResult: ServiceResultFactory;
+  fnResult: FnResultFactory;
   defineMethod: typeof defineMethod;
   serviceDecorator: FlameServiceDecorator;
   createRunnerServer: (options?: Omit<RunnerServerOptions, "registry">) => RunnerServer;
@@ -57,18 +54,6 @@ type ServiceFactory = {
   ) => { [K in keyof T]: MethodProxy<T[K]> };
 };
 
-type ServiceEffectFactory = {
-  <T extends Record<string, MethodInput>>(
-    serviceId: string,
-    methods: T,
-    options?: FlameOptions
-  ): { [K in keyof T]: MethodEffectProxy<T[K]> };
-  [key: string]: <T extends Record<string, MethodInput>>(
-    methods: T,
-    options?: FlameOptions
-  ) => { [K in keyof T]: MethodEffectProxy<T[K]> };
-};
-
 type FnFactory = {
   <T extends (...args: any[]) => Promise<any> | any>(
     functionId: string,
@@ -81,16 +66,28 @@ type FnFactory = {
   ) => T;
 };
 
-type FnEffectFactory = {
+type ServiceResultFactory = {
+  <T extends Record<string, MethodInput>>(
+    serviceId: string,
+    methods: T,
+    options?: FlameOptions
+  ): { [K in keyof T]: MethodResultProxy<T[K]> };
+  [key: string]: <T extends Record<string, MethodInput>>(
+    methods: T,
+    options?: FlameOptions
+  ) => { [K in keyof T]: MethodResultProxy<T[K]> };
+};
+
+type FnResultFactory = {
   <T extends (...args: any[]) => Promise<any> | any>(
     functionId: string,
     handler: T,
     options?: FlameOptions
-  ): (...args: Parameters<T>) => any;
+  ): (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>> | FlameError>;
   [key: string]: <T extends (...args: any[]) => Promise<any> | any>(
     handler: T,
     options?: FlameOptions
-  ) => (...args: Parameters<T>) => any;
+  ) => (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>> | FlameError>;
 };
 
 function mergeConfig(base: FlameConfig, next: FlameConfig): FlameConfig {
@@ -136,19 +133,19 @@ export function createFlame(initialConfig: FlameConfig = {}): FlameInstance {
 
   const service = createNamedProxy(serviceImpl) as ServiceFactory;
 
-  const serviceEffectImpl = <T extends Record<string, MethodInput>>(
+  const serviceResultImpl = <T extends Record<string, MethodInput>>(
     serviceId: string,
     methods: T,
     options?: FlameOptions
-  ) => {
+  ): { [K in keyof T]: MethodResultProxy<T[K]> } => {
     const normalized = normalizeMethods(methods as Record<string, any>);
     registerService(registry, serviceId, normalized.byId, options);
-    return createServiceProxyEffect(runtimeRef, serviceId, normalized.byProperty, options) as {
-      [K in keyof T]: MethodEffectProxy<T[K]>;
+    return createServiceProxy(runtimeRef, serviceId, normalized.byProperty, options, "result") as {
+      [K in keyof T]: MethodResultProxy<T[K]>;
     };
   };
 
-  const serviceEffect = createNamedProxy(serviceEffectImpl) as ServiceEffectFactory;
+  const serviceResult = createNamedProxy(serviceResultImpl) as ServiceResultFactory;
 
   const fnImpl = <T extends (...args: any[]) => Promise<any> | any>(
     functionId: string,
@@ -163,18 +160,18 @@ export function createFlame(initialConfig: FlameConfig = {}): FlameInstance {
 
   const fn = createNamedProxy(fnImpl) as FnFactory;
 
-  const fnEffectImpl = <T extends (...args: any[]) => Promise<any> | any>(
+  const fnResultImpl = <T extends (...args: any[]) => Promise<any> | any>(
     functionId: string,
     handler: T,
     options?: FlameOptions
-  ) => {
+  ): (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>> | FlameError> => {
     const normalized = normalizeMethods({ default: handler } as Record<string, any>);
     registerService(registry, functionId, normalized.byId, options);
-    const proxy = createServiceProxyEffect(runtimeRef, functionId, normalized.byProperty, options);
-    return proxy.default as (...args: Parameters<T>) => any;
+    const proxy = createServiceProxy(runtimeRef, functionId, normalized.byProperty, options, "result");
+    return proxy.default as (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>> | FlameError>;
   };
 
-  const fnEffect = createNamedProxy(fnEffectImpl) as FnEffectFactory;
+  const fnResult = createNamedProxy(fnResultImpl) as FnResultFactory;
 
   const createRunner = (options?: Omit<RunnerServerOptions, "registry">) => {
     const runnerOptions: RunnerServerOptions = { registry };
@@ -210,10 +207,9 @@ export function createFlame(initialConfig: FlameConfig = {}): FlameInstance {
   flame.configure = configure;
   flame.shutdown = shutdown;
   flame.service = service;
-  flame.serviceEffect = serviceEffect;
   flame.fn = fn;
-  flame.fnEffect = fnEffect;
-  flame.toEffect = toEffectFn;
+  flame.serviceResult = serviceResult;
+  flame.fnResult = fnResult;
   flame.defineMethod = defineMethod;
   flame.serviceDecorator = decorators.service;
   flame.createRunnerServer = createRunner;

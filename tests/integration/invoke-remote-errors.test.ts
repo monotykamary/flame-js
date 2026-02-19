@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { invokeRemote } from "../../src/invoke";
-import { FlameError, InvokeError } from "../../src/errors";
+import { InvokeError, SerializationError, TimeoutError } from "../../src/errors";
 
 function startServer(handler: () => Response | Promise<Response>) {
   const server = Bun.serve({
@@ -63,7 +63,7 @@ describe("invokeRemote errors", () => {
         undefined,
         {}
       )
-    ).rejects.toThrow(InvokeError);
+    ).rejects.toThrow(SerializationError);
 
     server.stop();
   });
@@ -115,7 +115,7 @@ describe("invokeRemote errors", () => {
   it("wraps flame errors with retryable metadata", async () => {
     const originalFetch = globalThis.fetch;
     (globalThis as any).fetch = () => {
-      throw new FlameError("timeout", "boom", { retryable: true });
+      throw new TimeoutError("boom", { retryable: true });
     };
 
     try {
@@ -149,7 +149,7 @@ describe("invokeRemote errors", () => {
         { timeoutMs: 5 },
         {}
       )
-    ).rejects.toThrow(InvokeError);
+    ).rejects.toThrow(TimeoutError);
 
     server.stop();
   });

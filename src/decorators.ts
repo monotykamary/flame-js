@@ -1,7 +1,7 @@
 import type { FlameOptions } from "./types";
 import type { FlameRegistry, MethodDefinition } from "./registry";
 import type { RuntimeRef } from "./runtime";
-import { FlameError } from "./errors";
+import { ConfigError } from "./errors";
 import { FLAME_META, type FlameMeta } from "./proxy";
 
 export interface FlameMethodDecoratorOptions extends FlameOptions {
@@ -103,8 +103,7 @@ function getServiceMeta(target: Function, metaKey: symbol): ServiceMeta {
 function resolveServiceId(meta: ServiceMeta, target: Function): string {
   if (meta.id) return meta.id;
   if (target.name) return target.name;
-  throw new FlameError(
-    "config_error",
+  throw new ConfigError(
     "Missing service id for decorator. Use @flameService('serviceId') or pass serviceId in @flame()"
   );
 }
@@ -222,7 +221,7 @@ export function createDecorators(
 
     return (target, propertyKey, descriptor) => {
       if (!descriptor || typeof descriptor.value !== "function") {
-        throw new FlameError("config_error", "@flame can only decorate methods");
+        throw new ConfigError("@flame can only decorate methods");
       }
 
       const isStatic = typeof target === "function";

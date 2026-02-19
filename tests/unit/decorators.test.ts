@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { Effect } from "effect";
 import { createFlame, flameService } from "../../src";
+import { getMeta } from "../../src/proxy";
 
 
 describe("decorators", () => {
@@ -42,12 +42,12 @@ describe("decorators", () => {
     expect(await Utils.ping()).toBe("pong");
     expect(flame.registry.getService("utils")).toBeDefined();
 
-    const effect = flame.toEffect(Utils.ping);
-    const result = await Effect.runPromise(effect());
-    expect(result).toBe("pong");
+    const handler = flame.registry.getService("utils")?.methods.get("ping")?.handler;
+    expect(handler).toBeDefined();
+    expect(await handler!({} as any)).toBe("pong");
   });
 
-  it("exposes effect conversions for decorated methods", async () => {
+  it("invokes decorated methods through wrappers", async () => {
     const flame = createFlame({ mode: "local" });
 
     @flame.serviceDecorator("calc")
@@ -59,8 +59,7 @@ describe("decorators", () => {
     }
 
     const calc = new Calc();
-    const effect = flame.toEffect(calc.square);
-    const result = await Effect.runPromise(effect(4));
+    const result = await calc.square(4);
     expect(result).toBe(16);
   });
 
@@ -87,6 +86,28 @@ describe("decorators", () => {
     const defaultService = new DefaultNamedService();
     expect(await defaultService.ok()).toBe("ok");
     expect(flame.registry.getService("DefaultNamedService")).toBeDefined();
+  });
+
+  it("exposes dynamic flame metadata getters", async () => {
+    const flame = createFlame({ mode: "local" });
+
+    @flame.serviceDecorator({ id: "meta-svc", pool: "default" })
+    class MetaService {
+      @flame({ id: "metaMethod", timeoutMs: 123 })
+      async ping() {
+        return "pong";
+      }
+    }
+
+    const instance = new MetaService();
+    await instance.ping();
+
+    const meta = getMeta(instance.ping);
+    expect(meta).toBeDefined();
+    expect(meta?.serviceId).toBe("meta-svc");
+    expect(meta?.methodId).toBe("metaMethod");
+    expect(meta?.options?.pool).toBe("default");
+    expect(meta?.options?.timeoutMs).toBe(123);
   });
 
   it("accepts options as the second decorator argument", async () => {

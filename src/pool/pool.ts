@@ -1,14 +1,14 @@
-import { Effect, Queue, Ref, Option } from "effect";
+import { tryAsync } from "errore";
 import type { PoolConfig, RunnerHandle, Backend } from "./types";
-import { InvokeError } from "../errors";
+import { ConfigError, FlameError, InvokeError, NoRunnerError } from "../errors";
 
 const POOL_INTERNALS = Symbol.for("flame.pool.internals");
 
 export interface Pool {
   name: string;
-  acquire: Effect.Effect<RunnerHandle, Error>;
-  release: (runner: RunnerHandle) => Effect.Effect<void, Error>;
-  shutdown: Effect.Effect<void, Error>;
+  acquire: () => Promise<RunnerHandle | FlameError>;
+  release: (runner: RunnerHandle) => Promise<void | FlameError>;
+  shutdown: () => Promise<void | FlameError>;
 }
 
 interface RunnerState {
@@ -23,8 +23,70 @@ interface PoolState {
 }
 
 interface PoolInternals {
-  spawnRunner: () => Effect.Effect<RunnerHandle, Error>;
-  stateRef: Ref.Ref<PoolState>;
+  spawnRunner: () => Promise<RunnerHandle | FlameError>;
+  getStateForTests: () => PoolState;
+  setStateForTests: (update: (state: PoolState) => PoolState) => void;
+}
+
+interface Mutex {
+  runExclusive: <T>(task: () => T | Promise<T>) => Promise<T>;
+}
+
+class AsyncQueue<T> {
+  private items: T[] = [];
+  private waiters: Array<(value: T) => void> = [];
+
+  constructor() {}
+
+  offer(item: T): void {
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      waiter(item);
+      return;
+    }
+    this.items.push(item);
+  }
+
+  poll(): T | undefined {
+    return this.items.shift();
+  }
+
+  take(): Promise<T> {
+    const item = this.poll();
+    if (item !== undefined) {
+      return Promise.resolve(item);
+    }
+
+    return new Promise<T>((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+}
+
+function createMutex(): Mutex {
+  let tail = Promise.resolve();
+  return {
+    async runExclusive<T>(task: () => T | Promise<T>): Promise<T> {
+      const previous = tail;
+      let release: (() => void) | undefined;
+      tail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await task();
+      } finally {
+        release?.();
+      }
+    }
+  };
+}
+
+function cloneState(state: PoolState): PoolState {
+  return {
+    runners: new Map(state.runners),
+    spawning: state.spawning
+  };
 }
 
 function normalizeConfig(config: PoolConfig) {
@@ -37,172 +99,217 @@ function normalizeConfig(config: PoolConfig) {
   };
 }
 
-export function createPool(
+async function executeBackend<T>(
+  operation: () => Promise<T | Error> | T | Error,
+  message: string
+): Promise<T | FlameError> {
+  const result = await tryAsync({
+    try: async () => operation(),
+    catch: (error: Error) => new InvokeError(message, { details: error })
+  });
+
+  if (result instanceof Error) {
+    return new InvokeError(message, { details: result });
+  }
+
+  return result;
+}
+
+export async function createPool(
   name: string,
   config: PoolConfig,
   backend?: Backend
-): Effect.Effect<Pool, Error> {
+): Promise<Pool | FlameError> {
   const cfg = normalizeConfig(config);
 
-  return Effect.gen(function* () {
-    const queue = yield* Queue.unbounded<RunnerHandle>();
-    const stateRef = yield* Ref.make<PoolState>({ runners: new Map(), spawning: 0 });
+  const created = await tryAsync({
+    try: async () => {
+      const queue = new AsyncQueue<RunnerHandle>();
+      const mutex = createMutex();
+      let state: PoolState = { runners: new Map(), spawning: 0 };
 
-    const addRunner = Effect.fn(`Pool.addRunner:${name}`)((handle: RunnerHandle) =>
-      Effect.gen(function* () {
-        const added = yield* Ref.modify(stateRef, (state) => {
+      const readState = async () =>
+        mutex.runExclusive(() => cloneState(state));
+
+      const updateState = async (update: (value: PoolState) => PoolState) =>
+        mutex.runExclusive(() => {
+          state = update(state);
+        });
+
+      const addRunner = async (handle: RunnerHandle): Promise<void> => {
+        const added = await mutex.runExclusive(() => {
           if (state.runners.has(handle.id)) {
-            return [false, state] as const;
+            return false;
           }
           const next = new Map(state.runners);
           next.set(handle.id, { handle, inUse: 0, lastUsed: Date.now() });
-          return [true, { ...state, runners: next }];
+          state = { ...state, runners: next };
+          return true;
         });
 
-        if (added) {
-          for (let i = 0; i < cfg.maxConcurrency; i += 1) {
-            yield* Queue.offer(queue, handle);
-          }
-        }
-      })
-    );
+        if (!added) return;
 
-    const spawnRunner = Effect.fn(`Pool.spawnRunner:${name}`)(() =>
-      Effect.gen(function* () {
+        for (let i = 0; i < cfg.maxConcurrency; i += 1) {
+          queue.offer(handle);
+        }
+      };
+
+      const incrementUsage = async (handle: RunnerHandle): Promise<boolean> =>
+        mutex.runExclusive(() => {
+          const existing = state.runners.get(handle.id);
+          if (!existing) return false;
+          const next = new Map(state.runners);
+          next.set(handle.id, {
+            ...existing,
+            inUse: existing.inUse + 1,
+            lastUsed: Date.now()
+          });
+          state = { ...state, runners: next };
+          return true;
+        });
+
+      const spawnRunner = async (): Promise<RunnerHandle | FlameError> => {
         if (!backend) {
-          throw new InvokeError("config_error", "No backend configured to spawn runners");
+          return new ConfigError("No backend configured to spawn runners");
         }
 
-        const shouldSpawn = yield* Ref.modify(stateRef, (state) => {
+        const shouldSpawn = await mutex.runExclusive(() => {
           const total = state.runners.size + state.spawning;
           if (total >= cfg.max) {
-            return [false, state] as const;
+            return false;
           }
-          return [true, { ...state, spawning: state.spawning + 1 }];
+          state = { ...state, spawning: state.spawning + 1 };
+          return true;
         });
 
         if (!shouldSpawn) {
-          throw new InvokeError("no_runner", `Pool '${name}' has reached max runners`);
+          return new NoRunnerError(`Pool '${name}' has reached max runners`);
         }
 
-        const handle = yield* backend.spawn({ poolName: name }).pipe(
-          Effect.mapError((error) =>
-            new InvokeError("invoke_error", "Failed to spawn runner", { details: error })
-          ),
-          Effect.ensuring(
-            Ref.update(stateRef, (state) => ({ ...state, spawning: Math.max(0, state.spawning - 1) }))
-          )
-        );
-
-        yield* addRunner(handle);
-        return handle;
-      })
-    );
-
-    // Seed static runners
-    for (const [index, runner] of cfg.runners.entries()) {
-      const handle: RunnerHandle = {
-        id: runner.id ?? `static-${name}-${index}`,
-        url: runner.url
+        try {
+          const handle = await executeBackend(
+            () => backend.spawn({ poolName: name }),
+            "Failed to spawn runner"
+          );
+          if (handle instanceof Error) return handle;
+          await addRunner(handle);
+          return handle;
+        } finally {
+          await updateState((current) => ({
+            ...current,
+            spawning: Math.max(0, current.spawning - 1)
+          }));
+        }
       };
-      yield* addRunner(handle);
-    }
 
-    const runnerCount = (yield* Ref.get(stateRef)).runners.size;
-    if (cfg.min > runnerCount) {
-      if (!backend) {
-        throw new InvokeError("config_error", "Pool requires a backend to reach min runners");
+      for (const [index, runner] of cfg.runners.entries()) {
+        const handle: RunnerHandle = {
+          id: runner.id ?? `static-${name}-${index}`,
+          url: runner.url
+        };
+        await addRunner(handle);
       }
-      const toSpawn = cfg.min - runnerCount;
-      for (let i = 0; i < toSpawn; i += 1) {
-        yield* spawnRunner();
-      }
-    }
 
-    const acquire = Effect.gen(function* () {
-      const poll = yield* Queue.poll(queue);
-      if (Option.isSome(poll)) {
-        const handle = poll.value;
-        const updated = yield* Ref.modify(stateRef, (state) => {
-          const existing = state.runners.get(handle.id);
-          if (!existing) {
-            return [false, state] as const;
+      const current = await readState();
+      if (cfg.min > current.runners.size) {
+        if (!backend) {
+          return new ConfigError("Pool requires a backend to reach min runners");
+        }
+        const toSpawn = cfg.min - current.runners.size;
+        for (let i = 0; i < toSpawn; i += 1) {
+          const spawned = await spawnRunner();
+          if (spawned instanceof Error) return spawned;
+        }
+      }
+
+      const tryConsumeRunner = async (
+        runner: RunnerHandle
+      ): Promise<RunnerHandle | undefined> => {
+        const updated = await incrementUsage(runner);
+        if (!updated) return undefined;
+        return runner;
+      };
+
+      const ensureCapacity = async (): Promise<void | FlameError> => {
+        const snapshot = await readState();
+        const canSpawn = !!backend && snapshot.runners.size + snapshot.spawning < cfg.max;
+        if (snapshot.runners.size === 0 && !canSpawn) {
+          return new NoRunnerError(`Pool '${name}' has no runners configured`);
+        }
+
+        if (!canSpawn) return;
+
+        const spawned = await spawnRunner();
+        if (spawned instanceof Error) return spawned;
+      };
+
+      const acquire = async (): Promise<RunnerHandle | FlameError> => {
+        while (true) {
+          const polled = queue.poll();
+          if (polled) {
+            const acquired = await tryConsumeRunner(polled);
+            if (acquired) return acquired;
+            continue;
           }
-          const next = new Map(state.runners);
-          next.set(handle.id, { ...existing, inUse: existing.inUse + 1, lastUsed: Date.now() });
-          return [true, { ...state, runners: next }];
-        });
 
-        if (!updated) {
-          return yield* acquire;
+          const capacity = await ensureCapacity();
+          if (capacity instanceof Error) return capacity;
+
+          const handle = await queue.take();
+          const acquired = await tryConsumeRunner(handle);
+          if (acquired) return acquired;
         }
-        return handle;
-      }
+      };
 
-      const state = yield* Ref.get(stateRef);
-      const canSpawn = !!backend && state.runners.size + state.spawning < cfg.max;
-
-      if (state.runners.size === 0 && !canSpawn) {
-        throw new InvokeError("no_runner", `Pool '${name}' has no runners configured`);
-      }
-
-      if (canSpawn) {
-        yield* spawnRunner();
-      }
-
-      const handle = yield* Queue.take(queue);
-      const updated = yield* Ref.modify(stateRef, (current) => {
-        const existing = current.runners.get(handle.id);
-        if (!existing) {
-          return [false, current] as const;
-        }
-        const next = new Map(current.runners);
-        next.set(handle.id, { ...existing, inUse: existing.inUse + 1, lastUsed: Date.now() });
-        return [true, { ...current, runners: next }];
-      });
-      if (!updated) {
-        return yield* acquire;
-      }
-      return handle;
-    }).pipe(Effect.withSpan(`Pool.acquire:${name}`)) as Effect.Effect<RunnerHandle, Error>;
-
-    const release = Effect.fn(`Pool.release:${name}`)((runner: RunnerHandle) =>
-      Effect.gen(function* () {
-        yield* Ref.update(stateRef, (state) => {
-          const existing = state.runners.get(runner.id);
-          if (!existing) return state;
-          const next = new Map(state.runners);
+      const release = async (runner: RunnerHandle): Promise<void | FlameError> => {
+        await updateState((current) => {
+          const existing = current.runners.get(runner.id);
+          if (!existing) return current;
+          const next = new Map(current.runners);
           next.set(runner.id, {
             ...existing,
             inUse: Math.max(0, existing.inUse - 1),
             lastUsed: Date.now()
           });
-          return { ...state, runners: next };
+          return { ...current, runners: next };
         });
-        yield* Queue.offer(queue, runner);
-      })
-    ) as (runner: RunnerHandle) => Effect.Effect<void, Error>;
 
-    const shutdown = Effect.gen(function* () {
-      const state = yield* Ref.get(stateRef);
-      if (backend) {
-        for (const runner of state.runners.values()) {
-          yield* backend.terminate(runner.handle).pipe(
-            Effect.catchAll((error) =>
-              Effect.fail(
-                new InvokeError("invoke_error", "Failed to terminate runner", { details: error })
-              )
-            )
+        queue.offer(runner);
+      };
+
+      const shutdown = async (): Promise<void | FlameError> => {
+        if (!backend) return;
+
+        const snapshot = await readState();
+        for (const runner of snapshot.runners.values()) {
+          const terminated = await executeBackend(
+            () => backend.terminate(runner.handle),
+            "Failed to terminate runner"
           );
+          if (terminated instanceof Error) return terminated;
         }
-      }
-    }).pipe(Effect.withSpan(`Pool.shutdown:${name}`)) as Effect.Effect<void, Error>;
+      };
 
-    const pool: Pool = { name, acquire, release, shutdown };
-    Object.defineProperty(pool, POOL_INTERNALS, {
-      value: { spawnRunner, stateRef } satisfies PoolInternals,
-      enumerable: false
-    });
-    return pool;
-  }) as Effect.Effect<Pool, Error>;
+      const pool: Pool = { name, acquire, release, shutdown };
+      Object.defineProperty(pool, POOL_INTERNALS, {
+        value: {
+          spawnRunner,
+          getStateForTests: () => cloneState(state),
+          setStateForTests: (update: (next: PoolState) => PoolState) => {
+            state = update(cloneState(state));
+          }
+        } satisfies PoolInternals,
+        enumerable: false
+      });
+
+      return pool;
+    },
+    catch: (error: Error) =>
+      error instanceof FlameError
+        ? error
+        : new InvokeError("Failed to create pool", { details: error })
+  });
+
+  if (created instanceof Error) return created;
+  return created;
 }

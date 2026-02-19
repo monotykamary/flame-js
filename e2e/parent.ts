@@ -1,4 +1,3 @@
-import { Effect } from "effect";
 import { flame } from "../src";
 import { MathService, addFn, decorated, StaticUtils } from "./services";
 
@@ -50,10 +49,9 @@ if (ping !== "pong") {
   process.exit(1);
 }
 
-const effectAdd = flame.toEffect(decorated.add);
-const effectResult = await Effect.runPromise(effectAdd(1, 1));
-if (effectResult !== 2) {
-  console.error("Unexpected effect result", effectResult);
+const wrappedResult = await decorated.add(1, 1);
+if (wrappedResult !== 2) {
+  console.error("Unexpected wrapped result", wrappedResult);
   process.exit(1);
 }
 

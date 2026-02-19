@@ -1,5 +1,3 @@
-import type { Effect } from "effect";
-
 export interface RunnerTarget {
   id?: string;
   url: string;
@@ -22,8 +20,10 @@ export interface SpawnOptions {
   poolName: string;
 }
 
+export type BackendResult<T> = Promise<T | Error> | T | Error;
+
 export interface Backend {
-  spawn: (options: SpawnOptions) => Effect.Effect<RunnerHandle, Error>;
-  terminate: (runner: RunnerHandle) => Effect.Effect<void, Error>;
-  healthCheck?: (runner: RunnerHandle) => Effect.Effect<boolean, Error>;
+  spawn: (options: SpawnOptions) => BackendResult<RunnerHandle>;
+  terminate: (runner: RunnerHandle) => BackendResult<void>;
+  healthCheck?: (runner: RunnerHandle) => BackendResult<boolean>;
 }

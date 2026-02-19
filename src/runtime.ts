@@ -1,29 +1,41 @@
-import { Effect, Schedule } from "effect";
+import { tryAsync } from "errore";
 import type { FlameConfig, FlameOptions, Mode } from "./types";
 import type { FlameRegistry } from "./registry";
 import { createPoolManager, type PoolManagerConfig } from "./pool/manager";
 import { invokeLocal, invokeRemote } from "./invoke";
-import { InvokeError } from "./errors";
+import { FlameError, InvokeError } from "./errors";
 
 export interface FlameRuntime {
   mode: Mode;
+  invokeResult: <ReturnType>(
+    serviceId: string,
+    methodId: string,
+    args: unknown[],
+    options?: FlameOptions
+  ) => Promise<ReturnType | FlameError>;
   invoke: <ReturnType>(
     serviceId: string,
     methodId: string,
     args: unknown[],
     options?: FlameOptions
   ) => Promise<ReturnType>;
-  invokeEffect: <ReturnType>(
-    serviceId: string,
-    methodId: string,
-    args: unknown[],
-    options?: FlameOptions
-  ) => Effect.Effect<ReturnType, Error>;
   shutdown: () => Promise<void>;
 }
 
 export interface RuntimeRef {
   current: FlameRuntime;
+}
+
+interface RetryPolicy {
+  maxAttempts: number;
+  baseDelayMs: number;
+}
+
+function wrapInvokeError(message: string, error: Error): FlameError {
+  if (error instanceof FlameError) {
+    return error;
+  }
+  return new InvokeError(message, { details: error });
 }
 
 function resolveMode(config: FlameConfig): Mode {
@@ -34,14 +46,35 @@ function resolveMode(config: FlameConfig): Mode {
   return "parent";
 }
 
-function buildRetrySchedule(retry?: FlameOptions["retry"]) {
+function buildRetryPolicy(retry?: FlameOptions["retry"]): RetryPolicy | null {
   const maxAttempts = retry?.maxAttempts ?? 1;
   if (maxAttempts <= 1) return null;
-  const baseDelay = retry?.baseDelayMs ?? 250;
-  return Schedule.intersect(
-    Schedule.exponential(baseDelay),
-    Schedule.recurs(maxAttempts - 1)
-  );
+  return {
+    maxAttempts,
+    baseDelayMs: retry?.baseDelayMs ?? 250
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetry<T>(
+  task: () => Promise<T | FlameError>,
+  policy: RetryPolicy | null
+): Promise<T | FlameError> {
+  if (!policy) return task();
+
+  for (let attempt = 1; attempt <= policy.maxAttempts; attempt += 1) {
+    const result = await task();
+    if (!(result instanceof Error)) return result;
+    if (attempt === policy.maxAttempts) return result;
+
+    const delayMs = policy.baseDelayMs * Math.pow(2, attempt - 1);
+    await sleep(delayMs);
+  }
+
+  return new InvokeError("Retry policy reached an unexpected state");
 }
 
 export function createRuntime(config: FlameConfig, registry: FlameRegistry): FlameRuntime {
@@ -61,56 +94,73 @@ export function createRuntime(config: FlameConfig, registry: FlameRegistry): Fla
   }
   const poolManager = createPoolManager(poolManagerConfig);
 
-  const invokeEffect = Effect.fn("FlameRuntime.invokeEffect")(
-    <ReturnType>(
-      serviceId: string,
-      methodId: string,
-      args: unknown[],
-      options?: FlameOptions
-    ) => {
-      if (mode !== "parent") {
-        return Effect.tryPromise({
-          try: () => invokeLocal<ReturnType>(registry, serviceId, methodId, args, options),
-          catch: (error) =>
-            error instanceof InvokeError
-              ? error
-              : new InvokeError("invoke_error", "Local invocation failed", { details: error })
-        });
-      }
-
-      const poolName = options?.pool ?? config.defaultPool ?? "default";
-
-      const effect = Effect.gen(function* () {
-        const pool = yield* poolManager.get(poolName);
-        const runner = yield* pool.acquire;
-
-        const call = Effect.tryPromise({
-          try: () => invokeRemote<ReturnType>(runner, serviceId, methodId, args, options, config),
-          catch: (error) =>
-            error instanceof InvokeError
-              ? error
-              : new InvokeError("invoke_error", "Remote invocation failed", { details: error })
-        });
-
-        const withRelease = call.pipe(Effect.ensuring(pool.release(runner).pipe(Effect.ignore)));
-        return yield* withRelease;
-      });
-
-      const schedule = buildRetrySchedule(options?.retry);
-      return schedule ? Effect.retry(effect, schedule) : effect;
-    }
-  );
-
-  const invoke = <ReturnType>(
+  const invokeWithResult = async <ReturnType>(
     serviceId: string,
     methodId: string,
     args: unknown[],
     options?: FlameOptions
-  ) => Effect.runPromise(invokeEffect<ReturnType>(serviceId, methodId, args, options));
+  ): Promise<ReturnType | FlameError> => {
+    if (mode !== "parent") {
+      return tryAsync({
+        try: () => invokeLocal<ReturnType>(registry, serviceId, methodId, args, options),
+        catch: (error: Error) => wrapInvokeError("Local invocation failed", error)
+      });
+    }
 
-  const shutdown = async () => {
-    await Effect.runPromise(poolManager.shutdownAll);
+    const poolName = options?.pool ?? config.defaultPool ?? "default";
+    const policy = buildRetryPolicy(options?.retry);
+
+    return withRetry(async () => {
+      const pool = await poolManager.get(poolName);
+      if (pool instanceof Error) {
+        return pool;
+      }
+
+      const runner = await pool.acquire();
+      if (runner instanceof Error) {
+        return runner;
+      }
+
+      await using cleanup = new AsyncDisposableStack();
+      cleanup.defer(async () => {
+        const release = await tryAsync(() => pool.release(runner));
+        if (release instanceof Error) {
+          // Best effort cleanup; invocation outcome should still win.
+        }
+      });
+
+      return await tryAsync({
+        try: () => invokeRemote<ReturnType>(runner, serviceId, methodId, args, options, config),
+        catch: (error: Error) => wrapInvokeError("Remote invocation failed", error)
+      });
+    }, policy);
   };
 
-  return { mode, invoke, invokeEffect, shutdown };
+  const invokeResult = async <ReturnType>(
+    serviceId: string,
+    methodId: string,
+    args: unknown[],
+    options?: FlameOptions
+  ): Promise<ReturnType | FlameError> => {
+    return invokeWithResult<ReturnType>(serviceId, methodId, args, options);
+  };
+
+  const invoke = async <ReturnType>(
+    serviceId: string,
+    methodId: string,
+    args: unknown[],
+    options?: FlameOptions
+  ): Promise<ReturnType> => {
+    const result = await invokeResult<ReturnType>(serviceId, methodId, args, options);
+    if (!(result instanceof Error)) return result;
+    throw result;
+  };
+
+  const shutdown = async () => {
+    const result = await poolManager.shutdownAll();
+    if (!(result instanceof Error)) return;
+    throw result;
+  };
+
+  return { mode, invokeResult, invoke, shutdown };
 }

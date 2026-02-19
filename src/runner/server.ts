@@ -1,7 +1,7 @@
 import type { FlameRegistry } from "../registry";
 import type { FlameConfig, InvocationRequest, InvocationResponse, InvocationContext } from "../types";
 import { deserialize, serialize } from "../serialization";
-import { InvokeError } from "../errors";
+import { FlameError, SerializationError, TimeoutError } from "../errors";
 import { validateWindow, verifySignature } from "../security";
 import { getMethod } from "../registry";
 
@@ -67,12 +67,13 @@ export function createRunnerServer(options: RunnerServerOptions): RunnerServer {
       try {
         args = deserialize<unknown[]>(payload.args);
       } catch (error) {
-        const details = options.exposeErrors ? error : undefined;
+        const serializationError = new SerializationError("Failed to deserialize arguments", { details: error });
+        const details = options.exposeErrors ? serializationError.details : undefined;
         return Response.json({
           ok: false,
           error: {
-            code: "serialization_error",
-            message: "Failed to deserialize arguments",
+            code: serializationError.code,
+            message: serializationError.message,
             ...(details !== undefined ? { details } : {}),
             retryable: false
           }
@@ -105,7 +106,7 @@ export function createRunnerServer(options: RunnerServerOptions): RunnerServer {
           ? new Promise<never>((_, reject) => {
               timeoutId = setTimeout(() => {
                 controller.abort();
-                reject(new InvokeError("timeout", "Invocation timed out"));
+                reject(new TimeoutError("Invocation timed out"));
               }, timeoutMs);
             })
           : null;
@@ -114,7 +115,7 @@ export function createRunnerServer(options: RunnerServerOptions): RunnerServer {
 
         return Response.json({ ok: true, result: serialize(result) } satisfies InvocationResponse);
       } catch (error) {
-        const invokeError = error instanceof InvokeError ? error : undefined;
+        const flameError = error instanceof FlameError ? error : undefined;
         const details = options.exposeErrors
           ? error instanceof Error
             ? { name: error.name, message: error.message, stack: error.stack }
@@ -124,14 +125,14 @@ export function createRunnerServer(options: RunnerServerOptions): RunnerServer {
         const response: InvocationResponse = {
           ok: false,
           error: {
-            code: invokeError?.code ?? "handler_error",
+            code: flameError?.code ?? "handler_error",
             message:
               error instanceof Error
                 ? error.message
                 : "Handler threw an error",
             ...(details !== undefined ? { details } : {}),
-            ...(invokeError?.retryable !== undefined
-              ? { retryable: invokeError.retryable }
+            ...(flameError?.retryable !== undefined
+              ? { retryable: flameError.retryable }
               : {})
           }
         };

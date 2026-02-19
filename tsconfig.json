@@ -17,12 +17,7 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "experimentalDecorators": true,
-    "types": ["bun-types"],
-    "plugins": [
-      {
-        "name": "@effect/language-service"
-      }
-    ]
+    "types": ["bun-types"]
   },
   "include": ["src", "tests", "e2e"]
 }

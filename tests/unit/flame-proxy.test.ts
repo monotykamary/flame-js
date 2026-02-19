@@ -34,4 +34,64 @@ describe("flame proxy ids", () => {
     expect(result).toBe("pong");
     expect(flame.registry.getService("ping")).toBeDefined();
   });
+
+  it("supports union-returning service proxies", async () => {
+    const flame = createFlame({ mode: "local" });
+    const ok = flame.serviceResult("ok", {
+      ping: async () => "pong"
+    });
+    const fail = flame.serviceResult("fail", {
+      boom: async () => {
+        throw new Error("boom");
+      }
+    });
+
+    const okResult = await ok.ping();
+    expect(okResult instanceof Error).toBe(false);
+    if (!(okResult instanceof Error)) {
+      expect(okResult).toBe("pong");
+    }
+
+    const failResult = await fail.boom();
+    expect(failResult instanceof Error).toBe(true);
+    if (failResult instanceof Error) {
+      expect(failResult.message).toContain("Local invocation failed");
+    }
+  });
+
+  it("supports union-returning fn proxies", async () => {
+    const flame = createFlame({ mode: "local" });
+    const ping = flame.fnResult.ping(async () => "pong");
+    const fail = flame.fnResult("boom", async () => {
+      throw new Error("boom");
+    });
+
+    const okResult = await ping();
+    expect(okResult instanceof Error).toBe(false);
+    if (!(okResult instanceof Error)) {
+      expect(okResult).toBe("pong");
+    }
+
+    const failResult = await fail();
+    expect(failResult instanceof Error).toBe(true);
+    if (failResult instanceof Error) {
+      expect(failResult.message).toContain("Local invocation failed");
+    }
+  });
+
+  it("returns errors as values in parent mode for result proxies", async () => {
+    const flame = createFlame({
+      mode: "parent",
+      pools: {}
+    });
+    const service = flame.serviceResult("svc", {
+      ping: async () => "pong"
+    });
+
+    const result = await service.ping();
+    expect(result instanceof Error).toBe(true);
+    if (result instanceof Error) {
+      expect(result.message).toContain("Pool not configured");
+    }
+  });
 });

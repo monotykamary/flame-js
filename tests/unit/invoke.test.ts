@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { buildInvocationRequest, invokeLocal } from "../../src/invoke";
 import { createRegistry } from "../../src/registry";
-import { InvokeError } from "../../src/errors";
+import { TimeoutError } from "../../src/errors";
 
 
 describe("invoke", () => {
@@ -39,7 +39,7 @@ describe("invoke", () => {
     });
 
     await expect(invokeLocal(registry, "svc", "slow", [], { timeoutMs: 10 })).rejects.toThrow(
-      InvokeError
+      TimeoutError
     );
   });
 });

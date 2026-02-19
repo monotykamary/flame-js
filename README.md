@@ -2,7 +2,7 @@
 
 [![codecov](https://codecov.io/gh/monotykamary/flame-js/branch/main/graph/badge.svg)](https://codecov.io/gh/monotykamary/flame-js)
 
-FLAME-style remote execution for TypeScript with Bun, Effect.ts internals, and a same-image / different-entrypoint model.
+FLAME-style remote execution for TypeScript with Bun, native union-style async error values, and a same-image / different-entrypoint model.
 
 ## Homage
 
@@ -22,7 +22,7 @@ FLAME lets you define services and functions once, then run them locally, on a p
 
 - Explicit service and method IDs (no dynamic imports or code shipping).
 - Superjson for arguments/results (structured data only).
-- Effect.ts for pooling, retries, and orchestration primitives.
+- Promise-first runtime internals with native `T | Error` flows.
 - Same image, different entrypoint deployments.
 
 ## Best-fit use cases
@@ -151,56 +151,107 @@ const ping = flame.fn.ping(async () => "pong");
 const result = await ping();
 ```
 
-### Effect integration
+### Error handling
 
-`FlameService.layer` provides a scoped instance and ensures shutdown.
+FLAME supports both styles:
+- Union APIs: `flame.serviceResult` and `flame.fnResult` (errors returned as values).
+- Throwing APIs: `flame.service` and `flame.fn`.
+
+Union style (errore-like early returns):
 
 ```ts
-import { Effect } from "effect";
-import { FlameService } from "@monotykamary/flame";
+import { FlameError, NoRunnerError, TimeoutError, flame } from "@monotykamary/flame";
 
-const program = Effect.gen(function* () {
-  const flame = yield* FlameService;
-  const ping = flame.fn.ping(async () => "pong");
-  return yield* Effect.tryPromise(() => ping());
-});
+const add = flame.fnResult("add", async (a: number, b: number) => a + b);
+const result = await add(2, 3);
 
-const layer = FlameService.layer({ mode: "local" });
-const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
+if (result instanceof TimeoutError) {
+  console.error("timed out");
+  return;
+}
+if (result instanceof NoRunnerError) {
+  console.error("no runner available");
+  return;
+}
+if (result instanceof FlameError) {
+  console.error(result);
+  return;
+}
+
+console.log(result); // 5
 ```
 
-### Effect structure (internal graph)
+Internally, FLAME errors are tagged classes (built with `errore.createTaggedError`) and still expose `code`, `details`, and `retryable` for transport/logging.
+
+Throwing style is still available when you prefer exceptions:
+
+```ts
+import { flame } from "@monotykamary/flame";
+
+const add = flame.fn("add", async (a: number, b: number) => a + b);
+
+try {
+  const result = await add(2, 3);
+  console.log(result); // 5
+} catch (error) {
+  console.error(error);
+}
+```
+
+`AsyncDisposableStack` is used internally where it improves cleanup clarity (for example runner release in parent mode). For a single resource, `await using` remains the simplest pattern.
+
+`FlameService.create` supports `await using` lifecycle management:
+
+```ts
+import { FlameService } from "@monotykamary/flame";
+
+await (async () => {
+  await using flame = FlameService.create({ mode: "local" });
+  const ping = flame.fn.ping(async () => "pong");
+  console.log(await ping());
+})();
+```
+
+`FlameService.using` is a convenience wrapper around the same lifecycle behavior:
+
+```ts
+import { FlameService } from "@monotykamary/flame";
+
+const result = await FlameService.using(async (flame) => {
+  const ping = flame.fn.ping(async () => "pong");
+  return ping();
+}, { mode: "local" });
+```
+
+### Runtime structure (internal graph)
 
 ```text
                          ┌──────────────────────────────┐
                          │           flame.ts           │
                          │  - service / fn              │
-                         │  - serviceEffect / fnEffect  │
-                         │  - toEffect                  │
                          └───────────────┬──────────────┘
                                          │
-                                         │ returns proxies or Effect wrappers
+                                         │ returns Promise-based proxies
                                          v
                          ┌──────────────────────────────┐
                          │          proxy.ts            │
-                         │  - createServiceProxyEffect  │
-                         │  - toEffect (wraps metadata) │
+                         │  - createServiceProxy        │
                          └───────────────┬──────────────┘
                                          │
                                          │ delegates to runtimeRef
                                          v
                          ┌──────────────────────────────┐
                          │         runtime.ts           │
-                         │  - invokeEffect (Effect.fn)  │
-                         │  - invoke (Promise boundary) │
+                         │  - invokeResult (union path) │
+                         │  - invoke (throwing boundary)│
                          └───────────────┬──────────────┘
                                          │
                                          │ uses PoolManager + Pool
                                          v
    ┌──────────────────────────────┐   ┌──────────────────────────────┐
    │      pool/manager.ts         │   │        pool/pool.ts          │
-   │  - get(name) -> Effect       │   │  - acquire/release/shutdown  │
-   │  - shutdownAll -> Effect     │   │  - Queue/Ref/Scope internals │
+   │  - get(name) -> Promise      │   │  - acquire/release/shutdown  │
+   │  - shutdownAll -> Promise    │   │  - async queue + mutex state │
    └───────────────┬──────────────┘   └───────────────┬──────────────┘
                    │                                  │
                    └──────────────┬───────────────────┘
@@ -211,10 +262,6 @@ const result = await Effect.runPromise(program.pipe(Effect.provide(layer)));
                          │    backend (config-driven)   │
                          │  - spawn/terminate/health    │
                          └──────────────────────────────┘
-
-Effect boundary:
-- Promise API: flame.service / flame.fn → runtime.invoke → Effect.runPromise(invokeEffect)
-- Effect API: flame.serviceEffect / fnEffect / toEffect → runtime.invokeEffect (returns Effect)
 ```
 
 ### Decorators (experimental)
@@ -280,12 +327,12 @@ class BillingService {
 By default, FLAME manages pools in memory. If you want dynamic runners, provide a backend:
 
 ```ts
-import { Effect } from "effect";
-
 const backend = {
-  spawn: ({ poolName }: { poolName: string }) =>
-    Effect.succeed({ id: `${poolName}-${Date.now()}`, url: "http://runner" }),
-  terminate: () => Effect.void
+  spawn: async ({ poolName }: { poolName: string }) => ({
+    id: `${poolName}-${Date.now()}`,
+    url: "http://runner"
+  }),
+  terminate: async () => {}
 };
 
 await flame.configure({
@@ -326,12 +373,11 @@ bun run test:coverage
 ## API surface (quick reference)
 
 - `createFlame(config?)`, `flame`
-- `flame.service`, `flame.serviceEffect`
-- `flame.fn`, `flame.fnEffect`
+- `flame.service`
+- `flame.fn`
 - `flame.configure`, `flame.shutdown`
 - `defineMethod`
-- `flame.toEffect`
-- `FlameService.layer`
+- `FlameService.create`, `FlameService.using`
 - `flame.createRunnerServer`
 
 ## License

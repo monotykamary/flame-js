@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project snapshot
-- Package: `@monotykamary/flame` (TypeScript, Bun, Effect)
+- Package: `@monotykamary/flame` (TypeScript, Bun, Errore)
 - Purpose: FLAME-style remote execution with parent/runner/local modes
 - Entry point: `src/index.ts`
 
@@ -13,8 +13,6 @@
 - All tests: `bun test`
 - Coverage: `bun test --coverage`
 - E2E (Docker): `docker compose up --build --exit-code-from parent`
-- Lint: `bun lint`
-- Effect diagnostics: `effect-language-service diagnostics --format pretty --project ./tsconfig.json`
 - Typecheck: `bun x tsc --noEmit`
 - Build: `bun build src/index.ts --outdir dist`
 
